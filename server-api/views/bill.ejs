@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang='en'>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <title>Bill for <%= bill.endDate.toDateString() %></title>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='navbar bg-dark navbar-primary'>
+                <h1 class='navbar-brand'>VoIP Telephony</h1>
+            </div>
+            <p>
+                <%= customer.lastName + ', ' + customer.firstName %><br/>
+                <%= customer.address.streetAddress %><br/>
+                <%= customer.address.city %><br/>
+                <%= customer.address.postalCode %><br/>
+            </p>
+            <p>
+                Phone Account: <%= phoneAccount.phoneNumber %><br/>
+                Billing Period: <%= bill.startDate.toDateString() + ' to ' + bill.endDate.toDateString() %>
+            </p>
+            <h5>Billing Plans Used:</h5>
+            <table class='table table-striped'>
+                <thead>
+                    <th>Name</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Amount Due</th>
+                </thead>
+                <tbody>
+                    <% bill.billingPlans.forEach((entry) => { %>
+                        <tr>
+                            <td><%= entry.billingPlan.name %></td>
+                            <td><%= entry.startDate.toDateString() %></td>
+                            <td><%= entry.endDate.toDateString() %></td>
+                            <td><%= (entry.amountDue.indexOf('$') > -1 ? entry.amountDue : '$' + entry.amountDue) %></td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+            <h5>Calls:</h5>
+            <table class='table table-striped'>
+                <thead>
+                    <th>Date</th>
+                    <th># Dialed</th>
+                    <th>Charge(s)</th>
+                </thead>
+                <tbody>
+                    <% bill.calls.forEach((call) => { %>
+                        <tr>
+                            <td><%= call.startDate.toDateString() %></td>
+                            <td><%= call.calleeNumber %></td>
+                            <td>
+                                <% call.charges.forEach((charge, index) => { %>
+                                    <% if (index > 0) { %>
+                                        <br/>
+                                    <% } %>
+                                    <%= charge.duration + ' minutes @ ' + (charge.rate.indexOf('$') > -1 ? charge.rate : '$' + charge.rate) + '/minute' %>
+                                <% }) %>
+                            </td>
+                        </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+            <p style='font-weight: bold'>Total due: <%= (bill.totalDue.indexOf('$') > -1 ? bill.totalDue : '$' + bill.totalDue) %></p>
+        </div>
+    </body>
+</html>

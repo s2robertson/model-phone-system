@@ -1,0 +1,32 @@
+{
+  "name": "model-phone-system",
+  "version": "1.0.0",
+  "scripts": {
+    "client": "cd react-client && npm start",
+    "server": "nodemon server.js",
+    "dev": "concurrently --kill-others-on-fail \"npm run server\" \"npm run client\"",
+    "test": "jest"
+  },
+  "dependencies": {
+    "bcrypt": "^5.0.0",
+    "ejs": "^3.1.5",
+    "express": "^4.17.1",
+    "express-session": "^1.17.1",
+    "mongoose": "^5.9.6",
+    "mongoose-beautiful-unique-validation": "^7.1.1",
+    "morgan": "^1.10.0",
+    "node-cron": "^2.0.3",
+    "nodemon": "^2.0.4",
+    "socket.io": "^2.3.0"
+  },
+  "devDependencies": {
+    "concurrently": "^5.1.0",
+    "jest": "^26.4.2"
+  },
+  "jest": {
+    "roots": [
+      "<rootDir>/server-api"
+    ],
+    "testEnvironment": "node"
+  }
+}
