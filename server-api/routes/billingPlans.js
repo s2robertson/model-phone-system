@@ -4,9 +4,7 @@ const router = express.Router();
 const { checkAuth } = require('../middleware/auth');
 router.use(checkAuth);
 
-const BillingPlan = require('../models/billingPlan');
-
-const StringHelper = require('../helpers/stringHelper');
+const BillingPlansController = require('../controllers/billingPlans');
 
 /**
  * Get a list of billing plans
@@ -14,20 +12,8 @@ const StringHelper = require('../helpers/stringHelper');
  * @returns billing plans (_id, name)
  */
 router.get('/', async (req, res) => {
-    const queryDoc = { isActive : true };
-
-    if (req.query.name && typeof req.query.name === 'string') {
-        queryDoc.name = { $regex : '^' + StringHelper.escapeRegEx(req.query.name) };
-    }
-    if (req.query.activeOnly === 'false' || req.query.activeOnly === false) {
-        queryDoc.isActive = false;
-    }
-
     try {
-        const billingPlans = await BillingPlan.find(queryDoc)
-            .select('name')
-            .sort({ name : 1 })
-            .exec();
+        const billingPlans = await BillingPlansController.findByQuery(req.query);
         
         res.status(200).json(billingPlans);
     }
@@ -46,9 +32,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
     const id = req.params.id;
     try {
-        const billingPlan = await BillingPlan.findById(id)
-            .select('-__v')
-            .exec();
+        const billingPlan = await BillingPlansController.findById(id);
         
         if (billingPlan) {
             res.status(200).json(billingPlan);
@@ -71,10 +55,7 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/', async (req, res) => {
     try {
-        const billingPlan = new BillingPlan();
-        billingPlan.set(req.body);
-
-        const doc = await billingPlan.save();
+        const doc = await BillingPlansController.createBillingPlan(req.body);
         res.status(201).json(doc);
     }
     catch (err) {
@@ -85,11 +66,9 @@ router.post('/', async (req, res) => {
 });
 
 router.patch('/:id', async (req, res) => {
-    const _id = req.params.id;
+    const id = req.params.id;
     try {
-        const doc = await BillingPlan.findByIdAndUpdate(_id, { $set : req.body }, { runValidators : true, returnOriginal : false })
-            .select('-__v')
-            .exec();
+        const doc = await BillingPlansController.updateBillingPlan(id, req.body);
         
         if (doc) {
             res.status(200).json(doc);
