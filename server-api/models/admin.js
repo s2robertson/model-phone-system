@@ -21,7 +21,7 @@ adminSchema.method('comparePassword', async function (other) {
 
 async function hashPassword() {
     let password = this.get('password');
-    if (password) {
+    if (password && this.isModified('password')) {
         password = await bcrypt.hash(password, saltRounds);
         this.set('password', password);
     }
