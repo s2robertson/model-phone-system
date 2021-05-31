@@ -9,7 +9,7 @@ import * as Yup from 'yup';
 
 import useFetchedData from '../hooks/useFetchedData'
 
-const moneyRegEx = /^((\$?\-?)|(\-?\$?))((\d{1,3}([, ]\d{3})*)|(\d+))(\.\d{1,2})?$/;
+const moneyRegEx = /^((\$?-?)|(-?\$?))((\d{1,3}([, ]\d{3})*)|(\d+))(\.\d{1,2})?$/;
 
 const schema = Yup.object({
     firstName : Yup.string()
