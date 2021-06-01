@@ -11,23 +11,13 @@ mongoose.Promise = global.Promise;
 const mongooseConnectOpts = { 
     useNewUrlParser: true, 
     useUnifiedTopology: true,
-    useFindAndModify : false
+    useFindAndModify : false,
+    useCreateIndex: true
 };
 if (process.env.NODE_ENV === 'production') {
     mongooseConnectOpts.autoIndex = false;
 }
 mongoose.connect(process.env.DB_CONN, mongooseConnectOpts);
-
-// obviously this needs a more fleshed out solution
-if (process.env.ADD_ADMIN === true) {
-    console.log('Adding admin');
-    const Admin = require('./server-api/models/admin');
-    const a = new Admin({
-        name : 'admin',
-        password : 'defaultpwd'
-    });
-    a.save();
-}
 
 const app = express();
 const port = process.env.PORT || 5000;
