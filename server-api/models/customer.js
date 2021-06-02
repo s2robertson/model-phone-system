@@ -27,7 +27,7 @@ const customerSchema = mongoose.Schema({
             required : true,
             uppercase : true,
             trim : true,
-            match : /[A-Z] *[0-9] *[A-Z] *[0-9] *[A-Z] *[0-9]/
+            match : /^([A-Z]\d){3}$/
         }
     },
     email : {

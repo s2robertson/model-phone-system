@@ -29,7 +29,10 @@ const schema = Yup.object({
             .required('Required'),
         postalCode : Yup.string()
             .ensure()
-            .required('Required'),
+            .trim()
+            .required('Required')
+            .uppercase()
+            .matches(/^([A-Z]\d){3}$/, 'Must be in the form [A-Z][0-9][A-Z][0-9][A-Z][0-9] without spaces')
     }),
     email : Yup.string()
         .ensure()
@@ -191,7 +194,7 @@ function CustomerForm({ customerId, initialData, saveCallback, ...props }) {
                     <FullField
                         label="Postal Code:"
                         name="address.postalCode"
-                    /> {/* to do: regex validation */}
+                    />
                     <FullField
                         label="Email:"
                         name="email"
