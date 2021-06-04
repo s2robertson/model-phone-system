@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const customerRoutes = require('./routes/customers');
-const phoneAccountRoutes = require('./routes/phoneAccounts');
-const billingPlanRoutes = require('./routes/billingPlans');
-const billRoutes = require('./routes/bills');
-const auth = require('./middleware/auth');
+const customerRoutes = require('./customers');
+const phoneAccountRoutes = require('./phoneAccounts');
+const billingPlanRoutes = require('./billingPlans');
+const billRoutes = require('./bills');
+const auth = require('../middleware/auth');
 
 router.use("/customers", customerRoutes);
 router.use('/phoneAccounts', phoneAccountRoutes);

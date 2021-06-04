@@ -1,9 +1,10 @@
+console.log("running")
 const https = require('https');
 const express = require('express');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
 const session = require('express-session');
-const router = require('./server-api/router');
+const router = require('./routes');
 
 //console.log(process.env.NODE_ENV);
 
@@ -60,11 +61,11 @@ const options = {
 };
 const server = https.createServer(options, app);
 const io = require('socket.io')(server, { serveClient : false });
-const phoneManager = require('./server-api/phone/phoneManager');
+const phoneManager = require('./phone/phoneManager');
 io.on('connection', phoneManager.onConnect);
 
 const cron = require('node-cron');
-const { processBills } = require('./server-api/billing/processBills');
+const { processBills } = require('./billing/processBills');
 cron.schedule('0 2 * * *', processBills);
 
 server.listen(port, () => console.log('Listening on port ' + port));
