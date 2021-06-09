@@ -19,7 +19,7 @@ class PhoneSounds(Enum) :
 
 class PhoneEmulator(Thread) :
 
-    def __init__(self, phone_id, server_url='https://localhost:5000', ssl_verify=True) :
+    def __init__(self, phone_id, server_url, ssl_verify) :
         super().__init__()
         self._sio = socketio.Client(ssl_verify=ssl_verify)
         self._server_url = server_url
@@ -434,14 +434,16 @@ class PhoneEmulator(Thread) :
             gui.notify()
 
 if __name__ == '__main__' :
-    import sys
+    import argparse
     from phone_gui import create_gui
 
-    phone_id = ''
-    if len(sys.argv) > 1 :
-        phone_id = sys.argv[1]
-
-    phone = PhoneEmulator(phone_id, ssl_verify=False)
+    parser = argparse.ArgumentParser(description='Run a phone emulator for the model phone system.')
+    parser.add_argument('phone_id', help='Phone account ID (A MongoDB ObjectId)')
+    parser.add_argument('server_url', default='https://localhost:5000', nargs='?')
+    parser.add_argument('--ssl_verify', action='store_true', help='Verify SSL certificates')
+    args = parser.parse_args()
+    
+    phone = PhoneEmulator(args.phone_id, args.server_url, args.ssl_verify)
     phone.start()
 
     create_gui(phone)

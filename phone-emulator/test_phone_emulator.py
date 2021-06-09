@@ -10,7 +10,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         MockSocketIoClient = patcher.start()
         self.addCleanup(patcher.stop)
 
-        self.phone = PhoneEmulator('abc')
+        self.phone = PhoneEmulator('abc', 'https://localhost:5000')
         self.phone.start()
         self.phone._socket_connect_event()
         self.phone._socket_registered_event('0000')
@@ -28,7 +28,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.phone.shutdown()
         self.phone.join()
         self.sio.reset_mock()
-        self.phone = PhoneEmulator('abc')
+        self.phone = PhoneEmulator('abc', 'https://localhost:5000')
         self.assertTrue(self.phone._on_hook)
         self.assertEqual(self.phone._state, self.phone._disconnected)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
