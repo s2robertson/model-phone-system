@@ -25,6 +25,16 @@ services:
             - SSL_KEY_FILE=./ssl/key.pem
             - SSL_CRT_FILE=./ssl/certificate.pem
         stdin_open: true
+    
+    # phone_0001:
+        # build: ./phone-emulator
+        # command: <phone account ID> https://server:5000
+        # volumes:
+            # - ./phone-emulator:/phone-emulator
+            # - /phone-emulator/__pycache__
+            # - /tmp/.X11-unix:/tmp/.X11-unix:rw
+        # environment:
+            # - DISPLAY=$DISPLAY
         
     mongodb:
         image: mongo:latest
