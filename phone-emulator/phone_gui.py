@@ -8,6 +8,7 @@ class PhoneGui(tk.Frame) :
         phone.register_gui(self)
         self.phone = phone
 
+        # display_frame is just for the text box and scroll bar
         self.display_frame = tk.Frame(self)
         self.display_text = tk.Text(self.display_frame, width=33, height=6, font=('Arial', 12))
         self.display_scroll = tk.Scrollbar(self.display_frame)
@@ -66,14 +67,15 @@ class PhoneGui(tk.Frame) :
 
     # The underlying phone emulator has updated, so poll it for data
     def notify(self) :
+        phone_number = self.phone._phone_number
         if self.phone._on_hook :
             self.button_on_off_hook['text'] = 'Lift receiver'
             self.button_on_off_hook['command'] = self.off_hook
-            phone_str = f'On hook ({self.phone._sound.value})'
+            phone_str = f'{phone_number}: On hook ({self.phone._sound.value})'
         else :
             self.button_on_off_hook['text'] = 'Return receiver'
             self.button_on_off_hook['command'] = self.on_hook
-            phone_str = f'Off hook ({self.phone._sound.value}).  Dialing {self.phone._number_dialed}'
+            phone_str = f'{phone_number}: Off hook ({self.phone._sound.value}).  Dialing {self.phone._number_dialed}'
 
         if self.phone._call_dialogue is not None :
             phone_str += '\n' + self.phone._call_dialogue
