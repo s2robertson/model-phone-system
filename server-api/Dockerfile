@@ -8,4 +8,4 @@ FROM base as test
 RUN npm test
 
 FROM base as app
-CMD ["./node_modules/nodemon/bin/nodemon.js", "server.js"]
+CMD ["./node_modules/nodemon/bin/nodemon.js", "server.js", "-L"]
