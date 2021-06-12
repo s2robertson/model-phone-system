@@ -1,9 +1,7 @@
-console.log("running")
 const https = require('https');
 const express = require('express');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
-const session = require('express-session');
 const router = require('./routes');
 
 //console.log(process.env.NODE_ENV);
@@ -20,6 +18,11 @@ if (process.env.NODE_ENV === 'production') {
 }
 mongoose.connect(process.env.DB_CONN, mongooseConnectOpts);
 
+const redis = require('redis');
+const session = require('express-session');
+const RedisStore = require('connect-redis')(session);
+const redisClient = redis.createClient(process.env.REDIS_CONN)
+
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(morgan('dev'));
@@ -33,12 +36,13 @@ app.use(session({
         secure : true,
         maxAge : 600000 // 10 minutes
     },
+    store: new RedisStore({ client: redisClient }),
     secret : process.env.SESSION_PWD || 'encryptme',
     saveUninitialized : false,
     resave : false
 }));
-app.set('view engine', 'ejs')
-app.set('views', './server-api/views');
+//app.set('view engine', 'ejs')
+//app.set('views', './server-api/views');
 app.use("/api", router);
 
 // fallback for route not found

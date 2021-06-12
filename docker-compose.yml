@@ -11,6 +11,7 @@ services:
         environment:
             - PORT=5000
             - DB_CONN=mongodb://mongodb:27017/model-phone-system
+            - REDIS_CONN=redis://redis:6379
             - SESSION_PWD=supercalifragilisticexpialodocious
 
     client:
@@ -43,6 +44,15 @@ services:
             - mongo-data:/data/db
         environment: 
             - MONGO_INITDB_DATABASE=model-phone-system
+    
+    redis:
+        image: redis:6-alpine
+        command: redis-server /usr/local/etc/redis/redis.conf
+        volumes: 
+            - ./redis:/usr/local/etc/redis
+            - redis-data:/data
+
 
 volumes:
     mongo-data:
+    redis-data:
