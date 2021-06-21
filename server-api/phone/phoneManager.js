@@ -1,3 +1,8 @@
+let io;
+//const redis = require('redis');
+// Potential improvement: use a separate redis instance instead of just namespacing
+//const redisClient = redis.createClient(process.env.REDIS_CONN, { db: 1 });
+
 const PhoneAccount = require('../models/phoneAccount');
 const BillingPlan = require('../models/billingPlan');
 const Call = require('../models/call');
@@ -360,18 +365,23 @@ class Phone {
     }
 }
 
-module.exports.onConnect = function(socket) {
-    // console.log('New client connected');
-    const phone = new Phone(socket);    
+module.exports.init = function(server) {
+    io = require('socket.io')(server, { serveClient : false });
+    const redisAdapter = require('socket.io-redis');
+    io.adapter(redisAdapter(process.env.REDIS_CONN));
 
-    socket.on('disconnect', () => phone.onDisconnect());
-    socket.on('register', (phoneAccountId) => phone.onRegister(phoneAccountId));
-    socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
-    socket.on('call_acknowledged', () => phone.onCallAcknowledged());
-    socket.on('call_accepted', () => phone.onCallAccepted());
-    socket.on('hang_up', () => phone.onHangUp());
-    socket.on('call_refused', (reason) => phone.onCallRefused(reason));
-    socket.on('talk', (msg) => phone.onTalk(msg));
+    io.on('connection', (socket) => {
+        const phone = new Phone(socket);    
+        
+        socket.on('disconnect', () => phone.onDisconnect());
+        socket.on('register', (phoneAccountId) => phone.onRegister(phoneAccountId));
+        socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
+        socket.on('call_acknowledged', () => phone.onCallAcknowledged());
+        socket.on('call_accepted', () => phone.onCallAccepted());
+        socket.on('hang_up', () => phone.onHangUp());
+        socket.on('call_refused', (reason) => phone.onCallRefused(reason));
+        socket.on('talk', (msg) => phone.onTalk(msg));
+    })
 }
 
 module.exports.updatePhoneNumber = function(oldVal, newVal) {

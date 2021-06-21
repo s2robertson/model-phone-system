@@ -18,10 +18,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 mongoose.connect(process.env.DB_CONN, mongooseConnectOpts);
 
-const redis = require('redis');
+const Redis = require('ioredis');
 const session = require('express-session');
 const RedisStore = require('connect-redis')(session);
-const redisClient = redis.createClient(process.env.REDIS_CONN)
+const redisClient = new Redis(process.env.REDIS_CONN)
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -64,9 +64,8 @@ const options = {
     cert : fs.readFileSync('./ssl/certificate.pem')
 };
 const server = https.createServer(options, app);
-const io = require('socket.io')(server, { serveClient : false });
 const phoneManager = require('./phone/phoneManager');
-io.on('connection', phoneManager.onConnect);
+phoneManager.init(server);
 
 const cron = require('node-cron');
 const { processBills } = require('./billing/processBills');
