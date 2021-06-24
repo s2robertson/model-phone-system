@@ -19,25 +19,23 @@ class PhoneSounds(Enum) :
 
 class PhoneEmulator(Thread) :
 
-    def __init__(self, phone_id, server_url, ssl_verify) :
+    def __init__(self, phone_number, server_url, ssl_verify=False) :
         super().__init__()
         self._sio = socketio.Client(ssl_verify=ssl_verify)
+        self._phone_number = phone_number
         self._server_url = server_url
-        self._phone_id = phone_id
-        self._phone_number = None
         self._on_hook = True
         self._sound = PhoneSounds.SILENT
         self._number_dialed = ''
         self._emit_hangup = False
-        self._call_dialogue = None
+        self._call_dialogue = 'Not connected to server'
         self._call_timer = None
         self._events = Queue()
 
         self._sio.on('connect', self._socket_connect_event)
-        self._sio.on('reconnect', self._socket_reconnect_event)
+        self._sio.on('connect_error', self._socket_connect_error_event)
         self._sio.on('disconnect', self._socket_disconnect_event)
         self._sio.on('registered', self._socket_registered_event)
-        self._sio.on('registration_failed', self._socket_register_failed_event)
         self._sio.on('call_request', self._socket_call_request_event)
         self._sio.on('callee_ringing', self._socket_callee_ringing_event)
         self._sio.on('call_not_possible', self._socket_call_not_possible_event)
@@ -51,14 +49,14 @@ class PhoneEmulator(Thread) :
 
         self._disconnected = {
             'server_connect' : self._server_connect_event,
+            'server_connect_error' : self._server_connect_error_event,
             'on_hook' : self._disconnected_on_hook_event,
             'off_hook' : self._disconnected_off_hook_event
         }
 
         self._unregistered = {
             'registered' : self._phone_registered_event,
-            'server_disconnect' : self._server_disconnect_event,
-            'registration_failed' : self._registration_failed_event
+            'server_disconnect' : self._server_disconnect_event
         }
 
         self._registration_failed = {
@@ -146,7 +144,12 @@ class PhoneEmulator(Thread) :
         self._guis = []
 
     def run(self) :
-        self._sio.connect(self._server_url)
+        try :
+            self._sio.connect(self._server_url, auth={"phoneNumber" : self._phone_number})
+        except socketio.client.exceptions.ConnectionError :
+            # this gets handled in the event loop
+            pass
+
         while True :
             event = self._events.get()
             
@@ -162,13 +165,20 @@ class PhoneEmulator(Thread) :
         self._sio.disconnect()
 
     def _server_connect_event(self, event) :
-        #print('Attempting to register:', self._phone_id)
-        self._sio.emit('register', self._phone_id)
+        self._call_dialogue = None
         self._notify_guis()
         return self._unregistered
+    
+    def _server_connect_error_event(self, event) :
+        self._sound = PhoneSounds.SILENT
+        self._call_dialogue = f'An error occurred ({event[1]["message"]}).  Please contact your systems administrator for assistance.'
+        self._notify_guis()
+        self._events.put(('shutdown',))
+        return self._registration_failed
 
     def _server_disconnect_event(self, event) :
         self._sound = PhoneSounds.SILENT
+        self._call_dialogue = 'Not connected to server'
         if self._call_timer is not None :
             if self._call_timer.is_alive() :
                 self._call_timer.cancel()
@@ -202,12 +212,6 @@ class PhoneEmulator(Thread) :
             ret = self._off_hook_dialing
         self._notify_guis()
         return ret
-
-    def _registration_failed_event(self, event) :
-        self._sound = PhoneSounds.SILENT
-        self._call_dialogue = f'An error occurred({event[1]}).  Please contact your systems administrator for assistance.'
-        self._notify_guis()
-        return self._registration_failed
 
     def _off_hook_event(self, event) :
         self._on_hook = False
@@ -359,8 +363,8 @@ class PhoneEmulator(Thread) :
     def _socket_connect_event(self) :
         self._events.put(('server_connect',))
 
-    def _socket_reconnect_event(self, attempt_num) :
-        self._events.put(('server_connect',))
+    def _socket_connect_error_event(self, data) :
+        self._events.put(('server_connect_error', data))
 
     def _socket_disconnect_event(self) :
         self._events.put(('server_disconnect',))
@@ -438,12 +442,12 @@ if __name__ == '__main__' :
     from phone_gui import create_gui
 
     parser = argparse.ArgumentParser(description='Run a phone emulator for the model phone system.')
-    parser.add_argument('phone_id', help='Phone account ID (A MongoDB ObjectId)')
+    parser.add_argument('phone_number', help='Four digit phone number')
     parser.add_argument('server_url', default='https://localhost:5000', nargs='?')
     parser.add_argument('--ssl_verify', action='store_true', help='Verify SSL certificates')
     args = parser.parse_args()
     
-    phone = PhoneEmulator(args.phone_id, args.server_url, args.ssl_verify)
+    phone = PhoneEmulator(args.phone_number, args.server_url, args.ssl_verify)
     phone.start()
 
     create_gui(phone)

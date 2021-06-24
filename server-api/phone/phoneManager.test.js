@@ -1,4 +1,4 @@
-jest.mock('ioredis');
+/*jest.mock('ioredis');
 const Redis = require('ioredis');
 
 test('test ioredis', () => {
@@ -8,9 +8,42 @@ test('test ioredis', () => {
     const inst = new Redis();
     const ret = inst.rpop();
     expect(ret).resolves.toEqual('foo');
-})
+})*/
 
 let PhoneManager;
+
+jest.mock('socket.io');
+const io = require('socket.io');
+const MockSocket = io.Socket;
+jest.mock('socket.io-redis');
+
+beforeEach(() => {
+    io.mockClear();
+    io.Server.mockClear();
+});
+
+test('Test server mock creation', () => {
+    const server = io('foo', 'bar');
+    expect(io).toHaveBeenCalledTimes(1);
+    expect(io).toHaveBeenLastCalledWith('foo', 'bar');
+    expect(server).toBe(io.Server.mock.instances[0]);
+    expect(io.Server).toBeCalledTimes(1);
+    expect(io.Server).toHaveBeenLastCalledWith('foo', 'bar');
+
+    const cb = jest.fn();
+    server.use(cb);
+    const onConnect = jest.fn();
+    server.on('connection', onConnect);
+    server._emit('beforeConnect');
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(onConnect).toHaveBeenCalledTimes(0);
+    server._emit('connection');
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(onConnect).toHaveBeenCalledTimes(1);
+
+    // this is to ensure that "this" has the correct value in the mock implemented methods
+    expect(server.hasOwnProperty('eventEmitter')).toBeTruthy();
+});
 
 jest.mock('../models/phoneAccount');
 const PhoneAccount = require('../models/phoneAccount');
@@ -20,27 +53,6 @@ jest.mock('../models/call');
 const Call = require('../models/call');
 jest.mock('../billing/processCall');
 const processCall = require('../billing/processCall');
-
-const EventEmitter = require('events');
-class MockSocket extends EventEmitter {
-    async receiveEvent(eventName, ...args) {
-        const listeners = this.listeners(eventName);
-        if (listeners && listeners.length > 0) {
-            for (let i = 0; i < listeners.length; i++) {
-                const res = listeners[i](...args);
-                if (res instanceof Promise) {
-                    await res;
-                }
-            }
-            return true;
-        }
-        return false;
-    }
-
-    emit() {
-        // do nothing
-    }
-}
 
 class MockObjectId {
     constructor(id) {
@@ -53,19 +65,20 @@ class MockObjectId {
 }
 
 describe('registration tests', () => {
+    let server;
     let mockSocket;
     let mockEmit;
-    let findByIdExec;
+    let findOneExec;
 
     beforeAll(() => {
-        findByIdExec = jest.fn().mockResolvedValue({
+        findOneExec = jest.fn().mockResolvedValue({
             _id : new MockObjectId('aaa'),
             phoneNumber : '1234',
             isActive : true,
             isSuspended : false
         });
-        PhoneAccount.findById.mockReturnValue({
-            exec : findByIdExec
+        PhoneAccount.findOne.mockReturnValue({
+            exec : findOneExec
         });
     });
 
@@ -73,31 +86,38 @@ describe('registration tests', () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
         });
-        mockSocket = new MockSocket();
+        PhoneManager.init(null);
+        server = io.Server.mock.instances[0];
+        mockSocket = new MockSocket('1234');
         mockEmit = jest.spyOn(mockSocket, 'emit');
-    })
+    });
 
-    test.skip('registering with a valid id', async () => {
-        PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
+    test('registering with a valid id', async () => {
+        const next = jest.fn();
+        await server._emit('beforeConnect', mockSocket, next);
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(next.mock.calls[0].length).toBe(0);
+
+        await server._emit('connection', mockSocket);
 
         expect(mockEmit).toHaveBeenCalledTimes(1);
         expect(mockEmit).toHaveBeenLastCalledWith('registered', '1234');
     });
 
-    test.skip('registering without a valid id', async () => {
-        findByIdExec.mockResolvedValueOnce();  // undefined
+    test('registering without a valid id', async () => {
+        findOneExec.mockResolvedValueOnce();  // undefined
+        const next = jest.fn();
+        await server._emit('beforeConnect', mockSocket, next);
+        expect(next).toHaveBeenCalledTimes(1);
+        expect(next.mock.calls[0].length).toBe(1);
+        expect(next.mock.calls[0][0] instanceof Error).toBe(true);  // Is there additional verification to do here?
 
-        PhoneManager.onConnect(mockSocket)
-        await mockSocket.receiveEvent('register', 'bbb');
-
-        expect(mockEmit).toHaveBeenCalledTimes(1);
-        expect(mockEmit).toHaveBeenLastCalledWith('registration_failed', 'invalid_account');
+        expect(mockEmit).toHaveBeenCalledTimes(0);
     });
 
-    test.skip('registering with an already taken phone number', async () => {
+    /*test.skip('registering with an already taken phone number', async () => {
         PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
+        await mockSocket._emit('register', 'aaa');
 
         expect(mockEmit).toHaveBeenCalledTimes(1);
         expect(mockEmit).toHaveBeenLastCalledWith('registered', '1234');
@@ -105,22 +125,23 @@ describe('registration tests', () => {
         const otherSocket = new MockSocket();
         const otherEmit = jest.spyOn(otherSocket, 'emit');
         PhoneManager.onConnect(otherSocket);
-        await otherSocket.receiveEvent('register', 'aaa');
+        await otherSocket._emit('register', 'aaa');
 
         expect(otherEmit).toHaveBeenCalledTimes(1);
         expect(otherEmit).toHaveBeenLastCalledWith('registration_failed', 'phone_number_in_use');
-    });
+    });*/
 });
 
 describe('basic make_call failure tests', () => {
+    let server;
     let mockSocket;
     let mockEmit;
-    let findByIdExec
+    let findOneExec
 
     beforeAll(() => {
-        findByIdExec = jest.fn();
-        PhoneAccount.findById.mockReturnValue({
-            exec : findByIdExec
+        findOneExec = jest.fn();
+        PhoneAccount.findOne.mockReturnValue({
+            exec : findOneExec
         });    
     })
     
@@ -128,73 +149,78 @@ describe('basic make_call failure tests', () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
         });
-        mockSocket = new MockSocket();
+        PhoneManager.init(null);
+        server = io.Server.mock.instances[0];
+        mockSocket = new MockSocket('1111');
         mockEmit = jest.spyOn(mockSocket, 'emit');
     });
 
-    test.skip('making a call while not registered should fail', async () => {
+    /*test.skip('making a call while not registered should fail', async () => {
         PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('make_call', '2222');
+        await mockSocket._emit('make_call', '2222');
     
         expect(mockEmit).toHaveBeenCalledTimes(1);
         expect(mockEmit).toHaveBeenLastCalledWith('call_not_possible', 'not_registered');
-    });
+    });*/
 
-    test.skip('making a call while suspended should fail', async () => {
-        findByIdExec.mockResolvedValueOnce({
+    test('making a call while suspended should fail', async () => {
+        findOneExec.mockResolvedValueOnce({
             _id : new MockObjectId('aaa'),
             phoneNumber : '1111',
             isActive : true,
             isSuspended : true
         });
-        PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
-        await mockSocket.receiveEvent('make_call', '2222');
+        await server._emit('beforeConnect', mockSocket, jest.fn());
+        await server._emit('connection', mockSocket);
+        await mockSocket._emit('make_call', '2222');
 
         expect(mockEmit).toHaveBeenCalledTimes(2);
         expect(mockEmit).toHaveBeenLastCalledWith('call_not_possible', 'not_active');
     });
 
     test.skip('making a call after having closed the account should fail', async () => {
-        findByIdExec.mockResolvedValueOnce({
+        findOneExec.mockResolvedValueOnce({
             _id : new MockObjectId('aaa'),
             phoneNumber : '1111',
             isActive : false,
             isSuspended : false
         });
-        PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
-        await mockSocket.receiveEvent('make_call', '2222');
+        /* the mocking here might want revising--under regular operation, the phone account being 
+        * inactive would cause the db query to fail, which would prevent the phone from being registered
+        * with the PhoneManager in the first place */
+        await server._emit('beforeConnect', mockSocket, jest.fn());
+        await server._emit('connection', mockSocket);
+        await mockSocket._emit('make_call', '2222');
 
         expect(mockEmit).toHaveBeenCalledTimes(2);
         expect(mockEmit).toHaveBeenLastCalledWith('call_not_possible', 'not_active');
     });
 
-    test.skip('dialing yourself should fail', async () => {
-        findByIdExec.mockResolvedValueOnce({
+    test('dialing yourself should fail', async () => {
+        findOneExec.mockResolvedValueOnce({
             _id : new MockObjectId('aaa'),
             phoneNumber : '1111',
             isActive : true,
             isSuspended : false
         });
-        PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
-        await mockSocket.receiveEvent('make_call', '1111');
+        await server._emit('beforeConnect', mockSocket, jest.fn());
+        await server._emit('connection', mockSocket);
+        await mockSocket._emit('make_call', '1111');
 
         expect(mockEmit).toHaveBeenCalledTimes(2);
         expect(mockEmit).toHaveBeenLastCalledWith('call_not_possible', 'dialed_self');
     });
 
-    test.skip('dialing an inactive number should fail', async () => {
-        findByIdExec.mockResolvedValueOnce({
+    test('dialing an inactive number should fail', async () => {
+        findOneExec.mockResolvedValueOnce({
             _id : new MockObjectId('aaa'),
             phoneNumber : '1111',
             isActive : true,
             isSuspended : false
         });
-        PhoneManager.onConnect(mockSocket);
-        await mockSocket.receiveEvent('register', 'aaa');
-        await mockSocket.receiveEvent('make_call', '2222');
+        await server._emit('beforeConnect', mockSocket, jest.fn());
+        await server._emit('connection', mockSocket);
+        await mockSocket._emit('make_call', '2222');
 
         expect(mockEmit).toHaveBeenCalledTimes(2);
         expect(mockEmit).toHaveBeenLastCalledWith('call_not_possible', 'no_recipient');
@@ -202,6 +228,7 @@ describe('basic make_call failure tests', () => {
 });
 
 describe('make_call tests with two parties', () => {
+    let server;
     let mockSocket1111;
     let mockEmit1111;
     let mockSocket2222;
@@ -228,13 +255,13 @@ describe('make_call tests with two parties', () => {
         pricePerMinute : '0.10'
     };
 
-    let paFindByIdExec;
+    let paFindOneExec;
     let paFindExec;
 
     beforeAll(() => {
-        paFindByIdExec = jest.fn();
-        PhoneAccount.findById.mockReturnValue({
-            exec : paFindByIdExec
+        paFindOneExec = jest.fn();
+        PhoneAccount.findOne.mockReturnValue({
+            exec : paFindOneExec
         });
         paFindExec = jest.fn().mockResolvedValue([phoneAccount1111, phoneAccount2222]);
         PhoneAccount.find.mockReturnValue({
@@ -251,7 +278,9 @@ describe('make_call tests with two parties', () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
         });
-        paFindByIdExec
+        PhoneManager.init(null);
+        server = io.Server.mock.instances[0];
+        paFindOneExec
             .mockResolvedValueOnce(phoneAccount1111)
             .mockResolvedValueOnce(phoneAccount2222);
         Call.mockClear();
@@ -259,37 +288,37 @@ describe('make_call tests with two parties', () => {
         processCall.mockClear();
         BillingPlan.findById.mockClear();
 
-        mockSocket1111 = new MockSocket();
-        mockEmit1111 = jest.spyOn(mockSocket1111, 'emit');
-        PhoneManager.onConnect(mockSocket1111);
-        await mockSocket1111.receiveEvent('register', 'aaa');
+        mockSocket1111 = new MockSocket('1111');
+        mockEmit1111 = jest.spyOn(mockSocket1111, 'emit');        
+        await server._emit('beforeConnect', mockSocket1111, jest.fn());
+        await server._emit('connection', mockSocket1111);
         mockEmit1111.mockClear();
 
-        mockSocket2222 = new MockSocket();
+        mockSocket2222 = new MockSocket('2222');
         mockEmit2222 = jest.spyOn(mockSocket2222, 'emit');
-        PhoneManager.onConnect(mockSocket2222);
-        await mockSocket2222.receiveEvent('register', 'bbb');
+        await server._emit('beforeConnect', mockSocket2222, jest.fn());
+        await server._emit('connection', mockSocket2222);
         mockEmit2222.mockClear();
     });
 
-    test.skip('make_call success, caller hangs up', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
+    test('make_call success, caller hangs up', async () => {
+        await mockSocket1111._emit('make_call', '2222');
         expect(mockEmit1111).toHaveBeenCalledTimes(0);
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_request', '1111');
 
-        await mockSocket2222.receiveEvent('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
 
-        await mockSocket2222.receiveEvent('call_accepted');
+        await mockSocket2222._emit('call_accepted');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
 
         expect(Call).toHaveBeenCalledTimes(0);
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
@@ -301,17 +330,17 @@ describe('make_call tests with two parties', () => {
         const callDoc = Call.mock.instances[0];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
 
-        await mockSocket1111.receiveEvent('talk', 'Hello, bbb');
+        await mockSocket1111._emit('talk', 'Hello, bbb');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenCalledTimes(3);
         expect(mockEmit2222).toHaveBeenLastCalledWith('talk', 'Hello, bbb');
 
-        await mockSocket2222.receiveEvent('talk', 'Greetings, aaa');
+        await mockSocket2222._emit('talk', 'Greetings, aaa');
         expect(mockEmit2222).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('talk', 'Greetings, aaa');
 
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit2222).toHaveBeenCalledTimes(4);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
@@ -322,11 +351,11 @@ describe('make_call tests with two parties', () => {
         expect(callDoc.save).toHaveBeenCalledTimes(2);
     });
 
-    test.skip('make_call success, callee hangs up', async () => {
-        await mockSocket2222.receiveEvent('make_call', '1111');
-        await mockSocket1111.receiveEvent('call_acknowledged');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket2222.receiveEvent('call_accepted');
+    test('make_call success, callee hangs up', async () => {
+        await mockSocket2222._emit('make_call', '1111');
+        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket2222._emit('call_accepted');
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
@@ -339,19 +368,19 @@ describe('make_call tests with two parties', () => {
         const callDoc = Call.mock.instances[0];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
 
-        await mockSocket2222.receiveEvent('talk', 'Talking');
+        await mockSocket2222._emit('talk', 'Talking');
         expect(mockEmit2222).toHaveBeenCalledTimes(0);
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('talk', 'Talking');
 
-        await mockSocket1111.receiveEvent('talk', 'Talking back');
+        await mockSocket1111._emit('talk', 'Talking back');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit2222).toHaveBeenLastCalledWith('talk', 'Talking back');
-        await mockSocket2222.receiveEvent('talk', 'Talking some more...');
+        await mockSocket2222._emit('talk', 'Talking some more...');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('talk', 'Talking some more...');
 
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
@@ -362,166 +391,166 @@ describe('make_call tests with two parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDoc);
     });
 
-    test.skip('make_call twice', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('hang_up');
+    test('make_call twice', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket1111._emit('hang_up');
         expect(Call).toHaveBeenCalledTimes(1);
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
 
         // now call again
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenCalledTimes(3);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(2);
     });
 
-    test.skip('make call, then receive call', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('hang_up');
+    test('make call, then receive call', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket1111._emit('hang_up');
         expect(Call).toHaveBeenCalledTimes(1);
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
 
         // now the other phone calls
-        await mockSocket2222.receiveEvent('make_call', '1111');
-        await mockSocket1111.receiveEvent('call_acknowledged');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket2222.receiveEvent('call_accepted');
+        await mockSocket2222._emit('make_call', '1111');
+        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket2222._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenCalledTimes(3);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(2);
     });
 
-    test.skip('callee times out', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
+    test('callee times out', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
 
-        await mockSocket2222.receiveEvent('call_refused', 'timeout');
+        await mockSocket2222._emit('call_refused', 'timeout');
         expect(mockEmit2222).toHaveBeenCalledTimes(0);
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'timeout');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
         expect(Call).toHaveBeenCalledTimes(1);
     });
 
-    test.skip('caller hangs up before connecting', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
+    test('caller hangs up before connecting', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
 
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(0);
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_cancelled');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
         expect(Call).toHaveBeenCalledTimes(1);
     });
 
-    test.skip('callee indicates busy', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_refused', 'busy');
+    test('callee indicates busy', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_refused', 'busy');
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'busy');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
         expect(Call).toHaveBeenCalledTimes(1);
     });
 
-    test.skip('caller disconnects while ringing', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
+    test('caller disconnects while ringing', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
-        await mockSocket1111.receiveEvent('disconnect');
+        await mockSocket1111._emit('disconnect');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_cancelled');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
-        await mockSocket2222.receiveEvent('make_call', '1111');
+        await mockSocket2222._emit('make_call', '1111');
         expect(mockEmit2222).toHaveBeenCalledTimes(3);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_not_possible', 'no_recipient');
         expect(Call).toHaveBeenCalledTimes(0);
     });
 
-    test.skip('callee disconnects while ringing', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
+    test('callee disconnects while ringing', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
-        await mockSocket2222.receiveEvent('disconnect');
+        await mockSocket2222._emit('disconnect');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'callee_disconnected');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
-        await mockSocket1111.receiveEvent('make_call', '2222');
+        await mockSocket1111._emit('make_call', '2222');
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'no_recipient')
     });
 
-    test.skip('caller disconnects during call', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+    test('caller disconnects during call', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(Call).toHaveBeenCalledTimes(1);
         const callDoc = Call.mock.instances[0];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
         
         mockEmit2222.mockClear();
 
-        await mockSocket1111.receiveEvent('disconnect');
+        await mockSocket1111._emit('disconnect');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
         expect(callDoc.save).toHaveBeenCalledTimes(2);
@@ -529,17 +558,17 @@ describe('make_call tests with two parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDoc);
     });
 
-    test.skip('callee disconnects during call', async () => {
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+    test('callee disconnects during call', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(Call).toHaveBeenCalledTimes(1);
         const callDoc = Call.mock.instances[0];
 
         mockEmit1111.mockClear();
 
-        await mockSocket2222.receiveEvent('disconnect');
+        await mockSocket2222._emit('disconnect');
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
         expect(callDoc.save).toHaveBeenCalledTimes(2);
@@ -549,6 +578,7 @@ describe('make_call tests with two parties', () => {
 });
 
 describe('make_call tests with multiple parties', () => {
+    let server;
     let mockSocket1111;
     let mockEmit1111;
     let mockSocket2222;
@@ -593,14 +623,14 @@ describe('make_call tests with multiple parties', () => {
         pricePerMinute : '0.08'
     };
 
-    let paFindByIdExec;
+    let paFindOneExec;
     let paFindExec;
     let bpFindByIdExec;
 
     beforeAll(() => {
-        paFindByIdExec = jest.fn();
-        PhoneAccount.findById.mockReturnValue({
-            exec : paFindByIdExec
+        paFindOneExec = jest.fn();
+        PhoneAccount.findOne.mockReturnValue({
+            exec : paFindOneExec
         });
         paFindExec = jest.fn();
         PhoneAccount.find.mockReturnValue({
@@ -616,7 +646,9 @@ describe('make_call tests with multiple parties', () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
         });
-        paFindByIdExec
+        PhoneManager.init(null);
+        server = io.Server.mock.instances[0];
+        paFindOneExec
             .mockResolvedValueOnce(phoneAccount1111)
             .mockResolvedValueOnce(phoneAccount2222)
             .mockResolvedValueOnce(phoneAccount3333);
@@ -625,37 +657,37 @@ describe('make_call tests with multiple parties', () => {
         processCall.mockClear();
         BillingPlan.findById.mockClear();
 
-        mockSocket1111 = new MockSocket();
+        mockSocket1111 = new MockSocket('1111');
         mockEmit1111 = jest.spyOn(mockSocket1111, 'emit');
-        PhoneManager.onConnect(mockSocket1111);
-        await mockSocket1111.receiveEvent('register', 'aaa');
+        await server._emit('beforeConnect', mockSocket1111, jest.fn());
+        await server._emit('connection', mockSocket1111);
         mockEmit1111.mockClear();
 
-        mockSocket2222 = new MockSocket();
+        mockSocket2222 = new MockSocket('2222');
         mockEmit2222 = jest.spyOn(mockSocket2222, 'emit');
-        PhoneManager.onConnect(mockSocket2222);
-        await mockSocket2222.receiveEvent('register', 'bbb');
+        await server._emit('beforeConnect', mockSocket2222, jest.fn());
+        await server._emit('connection', mockSocket2222);
         mockEmit2222.mockClear();
 
-        mockSocket3333 = new MockSocket();
+        mockSocket3333 = new MockSocket('3333');
         mockEmit3333 = jest.spyOn(mockSocket3333, 'emit');
-        PhoneManager.onConnect(mockSocket3333);
-        await mockSocket3333.receiveEvent('register', 'ccc');
+        await server._emit('beforeConnect', mockSocket3333, jest.fn());
+        await server._emit('connection', mockSocket3333);
         mockEmit3333.mockClear();
     });
 
-    test.skip('make_call twice, different recipients', async () => {
+    test('make_call twice, different recipients', async () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValue(bpDocA);
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket2222.receiveEvent('hang_up');
+        await mockSocket2222._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(1);
@@ -665,15 +697,15 @@ describe('make_call tests with multiple parties', () => {
         // now for the second call
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         mockEmit1111.mockClear();
-        await mockSocket1111.receiveEvent('make_call', '3333');
-        await mockSocket3333.receiveEvent('call_acknowledged');
-        await mockSocket3333.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '3333');
+        await mockSocket3333._emit('call_acknowledged');
+        await mockSocket3333._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit3333).toHaveBeenCalledTimes(3);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(2);
@@ -681,18 +713,18 @@ describe('make_call tests with multiple parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(Call.mock.instances[1], bpDocA);
     });
 
-    test.skip('make a call, then receive a call (different parties)', async () => {
+    test('make a call, then receive a call (different parties)', async () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket2222.receiveEvent('hang_up');
+        await mockSocket2222._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(1);
@@ -703,15 +735,15 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
         mockEmit1111.mockClear();
-        await mockSocket3333.receiveEvent('make_call', '1111');
-        await mockSocket1111.receiveEvent('call_acknowledged');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket3333.receiveEvent('call_accepted');
+        await mockSocket3333._emit('make_call', '1111');
+        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit3333).toHaveBeenCalledTimes(3);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(2);
@@ -719,18 +751,18 @@ describe('make_call tests with multiple parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(Call.mock.instances[1], bpDocC);
     });
 
-    test.skip('receive a call, then make a call (different parties)', async () => {
+    test('receive a call, then make a call (different parties)', async () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
-        await mockSocket3333.receiveEvent('make_call', '1111');
-        await mockSocket1111.receiveEvent('call_acknowledged');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket3333.receiveEvent('call_accepted');
+        await mockSocket3333._emit('make_call', '1111');
+        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit3333).toHaveBeenCalledTimes(3);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(1);
@@ -741,15 +773,15 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
         mockEmit1111.mockClear();
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
-        await mockSocket2222.receiveEvent('hang_up');
+        await mockSocket2222._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
         expect(Call).toHaveBeenCalledTimes(2);
@@ -757,23 +789,23 @@ describe('make_call tests with multiple parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(Call.mock.instances[1], bpDocA);
     });
 
-    test.skip('callee disconnects, then caller makes another call', async () => {
+    test('callee disconnects, then caller makes another call', async () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValue(bpDocA);
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket2222.receiveEvent('disconnect');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket2222._emit('disconnect');
         expect(Call).toHaveBeenCalledTimes(1);
 
         mockEmit1111.mockClear();
         Call.prototype.save.mockClear();
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
-        await mockSocket1111.receiveEvent('make_call', '3333');
-        await mockSocket3333.receiveEvent('call_acknowledged');
-        await mockSocket3333.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
+        await mockSocket1111._emit('make_call', '3333');
+        await mockSocket3333._emit('call_acknowledged');
+        await mockSocket3333._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
@@ -782,7 +814,7 @@ describe('make_call tests with multiple parties', () => {
         const callDoc = Call.mock.instances[1];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
 
-        await mockSocket1111.receiveEvent('hang_up');
+        await mockSocket1111._emit('hang_up');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit3333).toHaveBeenCalledTimes(3);
         expect(mockEmit3333).toHaveBeenLastCalledWith('call_ended');
@@ -791,24 +823,24 @@ describe('make_call tests with multiple parties', () => {
         expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDocA);
     });
 
-    test.skip('callee disconnects, then caller receives a call', async () => {
+    test('callee disconnects, then caller receives a call', async () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
-        await mockSocket1111.receiveEvent('make_call', '2222');
-        await mockSocket2222.receiveEvent('call_acknowledged');
-        await mockSocket2222.receiveEvent('call_accepted');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket2222.receiveEvent('disconnect');
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket2222._emit('disconnect');
         expect(Call).toHaveBeenCalledTimes(1);
 
         mockEmit1111.mockClear();
         Call.prototype.save.mockClear();
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
-        await mockSocket3333.receiveEvent('make_call', '1111');
-        await mockSocket1111.receiveEvent('call_acknowledged');
-        await mockSocket1111.receiveEvent('call_accepted');
-        await mockSocket3333.receiveEvent('call_accepted');
+        await mockSocket3333._emit('make_call', '1111');
+        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
@@ -817,7 +849,7 @@ describe('make_call tests with multiple parties', () => {
         const callDoc = Call.mock.instances[1];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
 
-        await mockSocket3333.receiveEvent('hang_up');
+        await mockSocket3333._emit('hang_up');
         expect(mockEmit3333).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');

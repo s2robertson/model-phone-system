@@ -10,7 +10,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         MockSocketIoClient = patcher.start()
         self.addCleanup(patcher.stop)
 
-        self.phone = PhoneEmulator('abc', 'https://localhost:5000')
+        self.phone = PhoneEmulator('0000', 'https://localhost:5000')
         self.phone.start()
         self.phone._socket_connect_event()
         self.phone._socket_registered_event('0000')
@@ -28,7 +28,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.phone.shutdown()
         self.phone.join()
         self.sio.reset_mock()
-        self.phone = PhoneEmulator('abc', 'https://localhost:5000')
+        self.phone = PhoneEmulator('0000', 'https://localhost:5000')
         self.assertTrue(self.phone._on_hook)
         self.assertEqual(self.phone._state, self.phone._disconnected)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
@@ -40,15 +40,15 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._state, self.phone._unregistered)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.sio.connect.assert_called_once()
-        self.sio.emit.assert_called_once_with('register', 'abc')
+        self.sio.emit.assert_not_called()
 
         self.phone._socket_registered_event('0000')
         self.phone._events.join()
         self.assertTrue(self.phone._on_hook)
         self.assertEqual(self.phone._state, self.phone._on_hook_idle)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
-        self.sio.emit.assert_called_once()
-        emit_call_count = 1
+        self.sio.emit.assert_not_called()
+        emit_call_count = 0
 
         # make sure there's a dial tone
         self.phone.off_hook()
@@ -116,7 +116,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.assertTrue(self.phone._emit_hangup)
         self.sio.emit.assert_called_with('make_call', '1234')
-        emit_call_count = 2
+        emit_call_count = 1
         self.assertEqual(self.sio.emit.call_count, emit_call_count)
 
         # simulate a 'busy' response from the server
@@ -151,7 +151,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.assertTrue(self.phone._emit_hangup)
         self.sio.emit.assert_called_with('make_call', '1234')
-        emit_call_count = 2
+        emit_call_count = 1
         self.assertEqual(self.sio.emit.call_count, emit_call_count)
 
         # simulate a 'no_recipient' response from the server
@@ -184,7 +184,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._state, self.phone._init_outgoing_call)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.sio.emit.assert_called_with('make_call', '1234')
-        emit_call_count = 2
+        emit_call_count = 1
         self.assertEqual(self.sio.emit.call_count, emit_call_count)
 
         # now dial some more
@@ -219,7 +219,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._state, self.phone._on_hook_idle)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.sio.emit.assert_called_with('make_call', '1234')
-        emit_call_count = 2
+        emit_call_count = 1
         self.assertEqual(self.sio.emit.call_count, emit_call_count)
 
         # now make another call request, and make sure that it doesn't emit a request

@@ -1,7 +1,8 @@
 let io;
-//const redis = require('redis');
+
+// const Redis = require('ioredis');
 // Potential improvement: use a separate redis instance instead of just namespacing
-//const redisClient = redis.createClient(process.env.REDIS_CONN, { db: 1 });
+// const redisClient = new Redis(process.env.REDIS_CONN, { db: 1 });
 
 const PhoneAccount = require('../models/phoneAccount');
 const BillingPlan = require('../models/billingPlan');
@@ -30,9 +31,9 @@ const CALL_ENDED = 'call_ended';
 class Phone {
     constructor(socket) {
         this.socket = socket;
-        this.phoneState = PhoneStates.INVALID;
-        this.phoneNumber = null;
-        this.accountId = null;
+        this.phoneState = socket.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
+        this.phoneNumber = socket.phoneNumber;
+        this.accountId = socket.accountId;
         this.callPartner = null;
         this.billId = null;
         this.billingPlanId = null;
@@ -61,43 +62,6 @@ class Phone {
             default :
         }
         //this.phoneState = PhoneStates.INVALID;
-    }
-
-    async onRegister(phoneAccountId) {
-        try {
-            if (!phoneAccountId) {
-                this.socket.emit('registration_failed', 'invalid_account');
-                return;
-            }
-            
-            const phoneAccount = await PhoneAccount.findById(phoneAccountId).exec();
-            //console.log(`phoneAccount = ${phoneAccount}`);
-            if (!phoneAccount) {
-                // the reason could be elaborated on, e.g. to play feedback on the user's end
-                this.socket.emit('registration_failed', 'invalid_account');
-                return;
-            }
-    
-            const registerVal = registry.get(phoneAccount.phoneNumber);
-            if (registerVal && registerVal !== this) {
-                this.socket.emit('registration_failed', 'phone_number_in_use');
-                return;
-            }
-    
-            // Authorization code could go here
-    
-            if (phoneAccount.isActive && !phoneAccount.isSuspended) {
-                this.phoneState = PhoneStates.NOT_IN_CALL;
-            }
-            this.accountId = phoneAccount._id;
-            this.phoneNumber = phoneAccount.phoneNumber;
-            registry.set(this.phoneNumber, this);
-            this.socket.emit('registered', this.phoneNumber);
-        }
-        catch (err) {
-            //console.log(`onRegister failed! ${err}`);
-            this.socket.emit('registration_failed', 'error');
-        }
     }
 
     async onMakeCall(phoneNumber) {
@@ -370,17 +334,39 @@ module.exports.init = function(server) {
     const redisAdapter = require('socket.io-redis');
     io.adapter(redisAdapter(process.env.REDIS_CONN));
 
+    io.use(async (socket, next) => {
+        const phoneNumber = socket.handshake.auth.phoneNumber;
+        if (!phoneNumber) {
+            return next(new Error('No phone number provided'));
+        }
+
+        const phoneAccount = await PhoneAccount.findOne({
+            phoneNumber: phoneNumber,
+            isActive: true
+        }).exec();
+        if (!phoneAccount) {
+            return next(new Error('Invalid phone number'));
+        }
+
+        socket.accountId = phoneAccount._id;
+        socket.phoneNumber = phoneNumber;
+        socket.accountSuspended = phoneAccount.isSuspended;
+        next();
+    })
+
     io.on('connection', (socket) => {
         const phone = new Phone(socket);    
         
         socket.on('disconnect', () => phone.onDisconnect());
-        socket.on('register', (phoneAccountId) => phone.onRegister(phoneAccountId));
         socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
         socket.on('call_acknowledged', () => phone.onCallAcknowledged());
         socket.on('call_accepted', () => phone.onCallAccepted());
         socket.on('hang_up', () => phone.onHangUp());
         socket.on('call_refused', (reason) => phone.onCallRefused(reason));
         socket.on('talk', (msg) => phone.onTalk(msg));
+
+        registry.set(phone.phoneNumber, phone);
+        socket.emit('registered', phone.phoneNumber);
     })
 }
 
