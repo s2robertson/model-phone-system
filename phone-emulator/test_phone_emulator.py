@@ -377,7 +377,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertTrue(self.phone._emit_hangup)
 
         # set the call as timed out
-        self.phone._socket_call_timeout_event()
+        self.phone._socket_call_not_possible_event('timeout')
         self.phone._events.join()
         self.assertFalse(self.phone._on_hook)
         self.assertEqual(self.phone._state, self.phone._call_not_available)
@@ -395,7 +395,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._number_dialed, '2222')
         self.assertFalse(self.phone._emit_hangup)
         self.assertTrue(self.phone._call_timer.is_alive())
-        self.sio.emit.assert_called_with('call_acknowledged')
+        self.sio.emit.assert_called_with('call_acknowledged', '2222')
         #self.assertEqual(self.sio.emit.call_count, 1)
 
         # accept the call
@@ -428,7 +428,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._number_dialed, '2222')
         self.assertFalse(self.phone._emit_hangup)
         self.assertTrue(self.phone._call_timer.is_alive())
-        self.sio.emit.assert_called_with('call_acknowledged')
+        self.sio.emit.assert_called_with('call_acknowledged', '2222')
         call_count = self.sio.emit.call_count
         #self.assertEqual(self.sio.emit.call_count, 1)
 
@@ -452,7 +452,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._number_dialed, '2222')
         self.assertFalse(self.phone._emit_hangup)
         self.assertTrue(self.phone._call_timer.is_alive())
-        self.sio.emit.assert_called_with('call_acknowledged')
+        self.sio.emit.assert_called_with('call_acknowledged', '2222')
         self.assertEqual(self.sio.emit.call_count, call_count + 1)
         #self.assertEqual(self.sio.emit.call_count, 1)
         call_count += 1
@@ -481,7 +481,7 @@ class TestPhoneEmulator(unittest.TestCase) :
         self.assertEqual(self.phone._state, self.phone._on_hook_idle)
         self.assertEqual(self.phone._sound, PhoneSounds.SILENT)
         self.assertIsNone(self.phone._call_timer)
-        self.sio.emit.assert_called_with('call_refused', 'timeout')
+        self.sio.emit.assert_called_with('call_refused', ('2222', 'timeout'))
 
 if __name__ == '__main__' :
     unittest.main()

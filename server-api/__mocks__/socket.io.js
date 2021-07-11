@@ -1,24 +1,5 @@
-const EventEmitter = require('events');
+const AwaitEventEmitter = require('../helpers/awaitEventEmitter');
 
-async function doAsyncEmit(eventName, ...args) {
-    const listeners = this.listeners(eventName);
-    if (listeners && listeners.length > 0) {
-        for (let i = 0; i < listeners.length; i++) {
-            const res = listeners[i](...args);
-            if (res instanceof Promise) {
-                await res;
-            }
-        }
-        return true;
-    }
-    return false;
-}
-
-class AwaitEventEmitter extends EventEmitter {
-    async emit(...args) {
-        await doAsyncEmit.apply(this, args);
-    }
-}
 const io = jest.createMockFromModule('socket.io');
 io.mockImplementation((...args) => new io.Server(...args));
 
@@ -43,17 +24,22 @@ io.Server.prototype._emit = async function(eventName, ...args) {
     await this.eventEmitter.emit(eventName, ...args);
 }
 
-class MockSocket extends EventEmitter {
+class MockSocket {
     constructor(phoneNumber) {
-        super();
         this.handshake = {
             auth: {
                 phoneNumber
             }
         }
+        this.eventEmitter = new AwaitEventEmitter();
     }
+
+    on(eventName, handler) {
+        this.eventEmitter.on(eventName, handler);
+    }
+
     async _emit(...args) {
-        await doAsyncEmit.apply(this, args);
+        await this.eventEmitter.emit(...args);
     }
 
     emit() {

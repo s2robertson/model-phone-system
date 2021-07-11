@@ -1,25 +1,20 @@
-/*jest.mock('ioredis');
-const Redis = require('ioredis');
-
-test('test ioredis', () => {
-    const rpop = Redis.prototype.rpop;
-    rpop.mockResolvedValue('foo');
-
-    const inst = new Redis();
-    const ret = inst.rpop();
-    expect(ret).resolves.toEqual('foo');
-})*/
-
 let PhoneManager;
+
+const flushPromises = () => new Promise(setImmediate);
+jest.useFakeTimers();
 
 jest.mock('socket.io');
 const io = require('socket.io');
 const MockSocket = io.Socket;
-jest.mock('socket.io-redis');
+
+jest.mock('ioredis');
+const Redis = require('ioredis');
 
 beforeEach(() => {
     io.mockClear();
     io.Server.mockClear();
+    Redis.mockClear();
+    Redis.Pipeline.mockClear();
 });
 
 test('Test server mock creation', () => {
@@ -60,7 +55,13 @@ class MockObjectId {
     }
 
     equals(other) {
-        return other.id === this.id;
+        if (other instanceof MockObjectId) {
+            return this.id === other.id;
+        }
+        else if (typeof other === 'string') {
+            return this.id === other;
+        }
+        return false;
     }
 }
 
@@ -142,8 +143,8 @@ describe('basic make_call failure tests', () => {
         findOneExec = jest.fn();
         PhoneAccount.findOne.mockReturnValue({
             exec : findOneExec
-        });    
-    })
+        });
+    });
     
     beforeEach(() => {
         jest.isolateModules(() => {
@@ -307,7 +308,7 @@ describe('make_call tests with two parties', () => {
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit2222).toHaveBeenLastCalledWith('call_request', '1111');
 
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
@@ -353,7 +354,7 @@ describe('make_call tests with two parties', () => {
 
     test('make_call success, callee hangs up', async () => {
         await mockSocket2222._emit('make_call', '1111');
-        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_acknowledged', '2222');
         await mockSocket1111._emit('call_accepted');
         await mockSocket2222._emit('call_accepted');
 
@@ -393,7 +394,7 @@ describe('make_call tests with two parties', () => {
 
     test('make_call twice', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         await mockSocket1111._emit('hang_up');
@@ -404,7 +405,7 @@ describe('make_call tests with two parties', () => {
 
         // now call again
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -420,7 +421,7 @@ describe('make_call tests with two parties', () => {
 
     test('make call, then receive call', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         await mockSocket1111._emit('hang_up');
@@ -431,7 +432,7 @@ describe('make_call tests with two parties', () => {
 
         // now the other phone calls
         await mockSocket2222._emit('make_call', '1111');
-        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_acknowledged', '2222');
         await mockSocket1111._emit('call_accepted');
         await mockSocket2222._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -447,12 +448,12 @@ describe('make_call tests with two parties', () => {
 
     test('callee times out', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
 
-        await mockSocket2222._emit('call_refused', 'timeout');
+        await mockSocket2222._emit('call_refused', '1111', 'timeout');
         expect(mockEmit2222).toHaveBeenCalledTimes(0);
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'timeout');
@@ -460,7 +461,7 @@ describe('make_call tests with two parties', () => {
 
         // try calling again
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
@@ -470,7 +471,7 @@ describe('make_call tests with two parties', () => {
 
     test('caller hangs up before connecting', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
 
         mockEmit1111.mockClear();
         mockEmit2222.mockClear();
@@ -483,7 +484,7 @@ describe('make_call tests with two parties', () => {
 
         // try calling again
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
@@ -493,14 +494,14 @@ describe('make_call tests with two parties', () => {
 
     test('callee indicates busy', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_refused', 'busy');
+        await mockSocket2222._emit('call_refused', '1111', 'busy');
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'busy');
         expect(Call).toHaveBeenCalledTimes(0);
 
         // try calling again
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
@@ -510,7 +511,7 @@ describe('make_call tests with two parties', () => {
 
     test('caller disconnects while ringing', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         expect(mockEmit2222).toHaveBeenCalledTimes(1);
         await mockSocket1111._emit('disconnect');
         expect(mockEmit2222).toHaveBeenCalledTimes(2);
@@ -526,7 +527,7 @@ describe('make_call tests with two parties', () => {
 
     test('callee disconnects while ringing', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         await mockSocket2222._emit('disconnect');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -541,7 +542,7 @@ describe('make_call tests with two parties', () => {
 
     test('caller disconnects during call', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(Call).toHaveBeenCalledTimes(1);
@@ -560,7 +561,7 @@ describe('make_call tests with two parties', () => {
 
     test('callee disconnects during call', async () => {
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(Call).toHaveBeenCalledTimes(1);
@@ -680,7 +681,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValue(bpDocA);
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -698,7 +699,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         mockEmit1111.mockClear();
         await mockSocket1111._emit('make_call', '3333');
-        await mockSocket3333._emit('call_acknowledged');
+        await mockSocket3333._emit('call_acknowledged', '1111');
         await mockSocket3333._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -717,7 +718,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -736,7 +737,7 @@ describe('make_call tests with multiple parties', () => {
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
         mockEmit1111.mockClear();
         await mockSocket3333._emit('make_call', '1111');
-        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_acknowledged', '3333');
         await mockSocket1111._emit('call_accepted');
         await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -755,7 +756,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
         await mockSocket3333._emit('make_call', '1111');
-        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_acknowledged', '3333');
         await mockSocket1111._emit('call_accepted');
         await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -774,7 +775,7 @@ describe('make_call tests with multiple parties', () => {
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
         mockEmit1111.mockClear();
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -793,7 +794,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValue(bpDocA);
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         await mockSocket2222._emit('disconnect');
@@ -803,7 +804,7 @@ describe('make_call tests with multiple parties', () => {
         Call.prototype.save.mockClear();
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         await mockSocket1111._emit('make_call', '3333');
-        await mockSocket3333._emit('call_acknowledged');
+        await mockSocket3333._emit('call_acknowledged', '1111');
         await mockSocket3333._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -827,7 +828,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocA);
         await mockSocket1111._emit('make_call', '2222');
-        await mockSocket2222._emit('call_acknowledged');
+        await mockSocket2222._emit('call_acknowledged', '1111');
         await mockSocket2222._emit('call_accepted');
         await mockSocket1111._emit('call_accepted');
         await mockSocket2222._emit('disconnect');
@@ -838,7 +839,7 @@ describe('make_call tests with multiple parties', () => {
         paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount3333]);
         bpFindByIdExec.mockResolvedValueOnce(bpDocC);
         await mockSocket3333._emit('make_call', '1111');
-        await mockSocket1111._emit('call_acknowledged');
+        await mockSocket1111._emit('call_acknowledged', '3333');
         await mockSocket1111._emit('call_accepted');
         await mockSocket3333._emit('call_accepted');
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
@@ -857,4 +858,429 @@ describe('make_call tests with multiple parties', () => {
         expect(processCall).toHaveBeenCalledTimes(2);
         expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDocC);
     });
+
+    test('caller disconnects, then callee makes a call', async () => {
+        paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
+        bpFindByIdExec.mockResolvedValueOnce(bpDocA);
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged', '1111');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket1111._emit('disconnect');
+        expect(Call).toHaveBeenCalledTimes(1);
+
+        mockEmit2222.mockClear();
+        Call.prototype.save.mockClear();
+        paFindExec.mockResolvedValueOnce([phoneAccount2222, phoneAccount3333]);
+        bpFindByIdExec.mockResolvedValueOnce(bpDocB);
+        await mockSocket2222._emit('make_call', '3333');
+        await mockSocket3333._emit('call_acknowledged', '2222');
+        await mockSocket3333._emit('call_accepted');
+        await mockSocket2222._emit('call_accepted');
+        expect(mockEmit2222).toHaveBeenCalledTimes(2);
+        expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
+        expect(mockEmit3333).toHaveBeenCalledTimes(2);
+        expect(mockEmit3333).toHaveBeenLastCalledWith('call_connected');
+        expect(Call).toHaveBeenCalledTimes(2);
+        const callDoc = Call.mock.instances[1];
+        expect(callDoc.save).toHaveBeenCalledTimes(1);
+
+        await mockSocket3333._emit('hang_up');
+        expect(mockEmit3333).toHaveBeenCalledTimes(2);
+        expect(mockEmit2222).toHaveBeenCalledTimes(3);
+        expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
+        expect(callDoc.save).toHaveBeenCalledTimes(2);
+        expect(processCall).toHaveBeenCalledTimes(2);
+        expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDocB);
+    });
+
+    test('caller disconnects, then callee receives another call', async () => {
+        paFindExec.mockResolvedValueOnce([phoneAccount1111, phoneAccount2222]);
+        bpFindByIdExec.mockResolvedValueOnce(bpDocA);
+        await mockSocket1111._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged', '1111');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket1111._emit('call_accepted');
+        await mockSocket1111._emit('disconnect');
+        expect(Call).toHaveBeenCalledTimes(1);
+
+        mockEmit2222.mockClear();
+        Call.prototype.save.mockClear();
+        paFindExec.mockResolvedValueOnce([phoneAccount2222, phoneAccount3333]);
+        bpFindByIdExec.mockResolvedValueOnce(bpDocC);
+        await mockSocket3333._emit('make_call', '2222');
+        await mockSocket2222._emit('call_acknowledged', '3333');
+        await mockSocket2222._emit('call_accepted');
+        await mockSocket3333._emit('call_accepted');
+        expect(mockEmit2222).toHaveBeenCalledTimes(2);
+        expect(mockEmit2222).toHaveBeenLastCalledWith('call_connected');
+        expect(mockEmit3333).toHaveBeenCalledTimes(2);
+        expect(mockEmit3333).toHaveBeenLastCalledWith('call_connected');
+        expect(Call).toHaveBeenCalledTimes(2);
+        const callDoc = Call.mock.instances[1];
+        expect(callDoc.save).toHaveBeenCalledTimes(1);
+
+        await mockSocket3333._emit('hang_up');
+        expect(mockEmit3333).toHaveBeenCalledTimes(2);
+        expect(mockEmit2222).toHaveBeenCalledTimes(3);
+        expect(mockEmit2222).toHaveBeenLastCalledWith('call_ended');
+        expect(callDoc.save).toHaveBeenCalledTimes(2);
+        expect(processCall).toHaveBeenCalledTimes(2);
+        expect(processCall).toHaveBeenLastCalledWith(callDoc, bpDocC);
+    })
 });
+
+describe('tests involving remote phones', () => {
+    let server;
+    let mockSocket1111;
+    let mockEmit1111;
+    
+    const phoneAccount1111 = {
+        _id : new MockObjectId('aaa'),
+        phoneNumber : '1111',
+        isActive : true,
+        isSuspended : false,
+        billingPlan : 'billing_plan_aaa',
+        currentBill : 'bill_id_aaa'
+    };
+    const phoneAccount2222 = {
+        _id : new MockObjectId('bbb'),
+        phoneNumber : '2222',
+        isActive : true,
+        isSuspended : false,
+        billingPlan : 'billing_plan_bbb',
+        currentBill : 'bill_id_bbb'
+    };
+    const bpDocA = {
+        _id : 'billing_plan_aaa',
+        pricePerMinute : '0.10'
+    };
+    const bpDocB = {
+        _id : 'billing_plan_bbb',
+        pricePerMinute : '0.09'
+    };
+    const mockCallDoc = {
+        _id : 'mock_call_doc',
+        save : jest.fn()
+    }
+    
+    let paFindOneExec;
+    let paFindExec;
+    let bpFindByIdExec;
+    let callFindByIdExec;
+
+    let redisClient;
+    let subClient;
+
+    beforeAll(() => {
+        paFindOneExec = jest.fn().mockResolvedValue(phoneAccount1111);
+        PhoneAccount.findOne.mockReturnValue({
+            exec : paFindOneExec
+        });
+        paFindExec = jest.fn().mockResolvedValue([phoneAccount1111, phoneAccount2222]);
+        PhoneAccount.find.mockReturnValue({
+            exec : paFindExec
+        });
+        bpFindByIdExec = jest.fn().mockResolvedValue(bpDocA);
+        BillingPlan.findById.mockReturnValue({
+            exec : bpFindByIdExec
+        });
+        callFindByIdExec = jest.fn().mockResolvedValue(mockCallDoc);
+        Call.findById.mockReturnValue({
+            exec : callFindByIdExec
+        });
+
+        Redis.prototype.hgetall.mockResolvedValue({
+            accountId : 'bbb',
+            isValid : "true",
+            callId : null,
+            callBpId : null
+        });
+    });
+    
+    beforeEach(async () => {
+        jest.isolateModules(() => {
+            PhoneManager = require('./phoneManager');
+        });
+        
+        PhoneManager.init(null);
+        server = io.Server.mock.instances[0];
+        redisClient = Redis.mock.instances[0];
+        subClient = Redis.mock.instances[1];
+
+        Call.mockClear();
+        Call.findById.mockClear();
+        Call.prototype.save.mockClear();
+        processCall.mockClear();
+        BillingPlan.findById.mockClear();
+
+        Redis.Pipeline.prototype.hset.mockClear();
+        Redis.Pipeline.prototype.hdel.mockClear();
+        
+        mockSocket1111 = new MockSocket('1111');
+        mockEmit1111 = jest.spyOn(mockSocket1111, 'emit');
+        await server._emit('beforeConnect', mockSocket1111, jest.fn());
+        await server._emit('connection', mockSocket1111);
+        mockEmit1111.mockClear();
+    });
+
+    test('calling a remote phone, local phone hangs up', async () => {
+        // verify that redis data was set on connection
+        expect(redisClient.hset).toHaveBeenCalledTimes(1);
+        expect(redisClient.hset).toHaveBeenLastCalledWith('phone:1111', 'accountId', phoneAccount1111._id, 'isValid', true);
+        
+        await mockSocket1111._emit('make_call', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_request', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_connected', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
+
+        await mockSocket1111._emit('call_accepted');
+        expect(Call).toHaveBeenCalledTimes(1);
+        const callDoc = Call.mock.instances[0];
+        expect(callDoc.save).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_connected']));
+        
+        // verify that redis data was updated when the Call was created
+        expect(redisClient.multi).toHaveBeenCalledTimes(1);
+        expect(Redis.Pipeline).toHaveBeenCalledTimes(1);
+        let multi = Redis.Pipeline.mock.instances[0];
+        expect(multi.hset).toHaveBeenCalledTimes(2);
+        expect(multi.hset).toHaveBeenCalledWith('phone:1111', 'callId', callDoc.id, 'callBpId', phoneAccount1111.billingPlan);
+        expect(multi.hset).toHaveBeenCalledWith('phone:2222', 'callId', callDoc.id, 'callBpId', phoneAccount1111.billingPlan);
+        expect(multi.exec).toHaveBeenCalledTimes(1);
+
+        await mockSocket1111._emit('talk', 'Hello, remote phone');
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'talk', 'Hello, remote phone']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'talk', 'Response from remote phone']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(3);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('talk', 'Response from remote phone');
+
+        await mockSocket1111._emit('hang_up');
+        expect(callDoc.save).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenCalledTimes(4);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_ended', '1111', false]));
+
+        // verify that redis data was updated when the Call ended
+        expect(redisClient.multi).toHaveBeenCalledTimes(2);
+        expect(Redis.Pipeline).toHaveBeenCalledTimes(2);
+        multi = Redis.Pipeline.mock.instances[1];
+        expect(multi.hdel).toHaveBeenCalledTimes(2);
+        expect(multi.hdel).toHaveBeenCalledWith('phone:1111', 'callId', 'callBpId');
+        expect(multi.hdel).toHaveBeenCalledWith('phone:2222', 'callId', 'callBpId');
+        expect(multi.exec).toHaveBeenCalledTimes(1);
+    });
+
+    test('calling a remote phone, remote phone hangs up', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_request', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_connected', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
+
+        await mockSocket1111._emit('call_accepted');
+        expect(Call).toHaveBeenCalledTimes(1);
+        const callDoc = Call.mock.instances[0];
+        expect(callDoc.save).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_connected']));
+
+        // close call remotely
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_ended', '2222', true]));
+        await flushPromises();
+        expect(mockEmit1111).toHaveBeenCalledTimes(3);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
+        expect(callDoc.save).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['close_call_ack', '1111']));
+        expect(Redis.Pipeline).toHaveBeenCalledTimes(2);
+        const multi = Redis.Pipeline.mock.instances[1];
+        expect(multi.hdel).toHaveBeenCalledTimes(2);
+        expect(multi.hdel).toHaveBeenCalledWith('phone:1111', 'callId', 'callBpId');
+        expect(multi.hdel).toHaveBeenCalledWith('phone:2222', 'callId', 'callBpId');
+        expect(multi.exec).toHaveBeenCalledTimes(1);
+    });
+
+    test('called by remote phone, remote phone hangs up', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_acknowledged', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+
+        await mockSocket1111._emit('call_accepted');
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_ended', '2222', false]));
+        expect(mockEmit1111).toHaveBeenCalledTimes(3);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+    });
+
+    test('called by a remote phone, local phone hangs up, receives ack', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_acknowledged', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+
+        await mockSocket1111._emit('call_accepted');
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
+
+        await mockSocket1111._emit('hang_up');
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_ended', '1111', true]));
+        expect(processCall).not.toHaveBeenCalled();
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['close_call_ack', '2222']));
+        jest.runAllTimers();
+        await flushPromises();
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(processCall).not.toHaveBeenCalled();
+    });
+
+    test('called by a remote phone, local phone hangs up, does not receive ack', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_acknowledged', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+
+        await mockSocket1111._emit('call_accepted');
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
+
+        await mockSocket1111._emit('hang_up');
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_ended', '1111', true]));
+        expect(redisClient.multi).not.toHaveBeenCalled();
+        expect(processCall).not.toHaveBeenCalled();
+
+        redisClient.hgetall.mockResolvedValueOnce({
+            accountId : phoneAccount1111._id,
+            isValid : "true",
+            callId : mockCallDoc._id,
+            callBpId : bpDocB._id
+        });
+        bpFindByIdExec.mockResolvedValueOnce(bpDocB);
+        jest.runAllTimers();
+        await flushPromises();
+        expect(Call.findById).toBeCalledTimes(1);
+        expect(Call.findById).toHaveBeenLastCalledWith(mockCallDoc._id);
+        expect(BillingPlan.findById).toHaveBeenCalledTimes(1);
+        expect(BillingPlan.findById).toHaveBeenLastCalledWith(bpDocB._id);
+        expect(mockCallDoc.save).toHaveBeenCalledTimes(1);
+        expect(processCall).toHaveBeenCalledTimes(1);
+        expect(processCall).toHaveBeenLastCalledWith(mockCallDoc, bpDocB);
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenCalledTimes(3);
+        expect(redisClient.multi).toHaveBeenCalledTimes(1);
+        const multi = Redis.Pipeline.mock.instances[0];
+        expect(multi.hdel).toHaveBeenCalledTimes(2);
+        expect(multi.hdel).toHaveBeenCalledWith('phone:1111', 'callId', 'callBpId');
+        expect(multi.hdel).toHaveBeenCalledWith('phone:2222', 'callId', 'callBpId');
+    });
+
+    test('calling a remote phone, remote phone refuses', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_request', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_refused', '2222', 'busy']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'busy');
+    });
+
+    test('calling a remote phone, remote phone acknowledges, but then cancels', async () => {
+        await mockSocket1111._emit('make_call', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_request', '1111']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
+        
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_refused', '2222', 'callee_disconnected']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_not_possible', 'callee_disconnected');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+    });
+
+    test('called by a remote phone, local phone refuses', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_refused', '2222', 'busy');
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_refused', '1111', 'busy']));
+    });
+
+    test('called by a remote phone, local phone acknowledges, but then cancels', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_acknowledged', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+
+        await mockSocket1111._emit('disconnect');
+        expect(redisClient.publish).toHaveBeenCalledTimes(2);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_refused', '1111', 'callee_disconnected']));
+    });
+
+    test('called by a remote phone, remote phone cancels', async () => {
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(1);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
+
+        await mockSocket1111._emit('call_acknowledged', '2222');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_cancelled', '2222']));
+        expect(mockEmit1111).toHaveBeenCalledTimes(2);
+        expect(mockEmit1111).toHaveBeenLastCalledWith('call_cancelled');
+        expect(redisClient.publish).toHaveBeenCalledTimes(1);
+    });
+})

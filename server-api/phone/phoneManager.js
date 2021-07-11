@@ -1,8 +1,23 @@
 let io;
+const localRegistry = new Map();
+const getKey = phoneNumber => `phone:${phoneNumber}`;
 
-// const Redis = require('ioredis');
+const EventEmitter = require('events');
+const remoteEvents = new EventEmitter();
+
+const Redis = require('ioredis');
 // Potential improvement: use a separate redis instance instead of just namespacing
-// const redisClient = new Redis(process.env.REDIS_CONN, { db: 1 });
+const redisClient = new Redis(process.env.REDIS_CONN, { db: 1 });
+const subClient = redisClient.duplicate();
+
+subClient.on('message', (channel, msg) => {
+    const phone = localRegistry.get(channel);
+    if (phone) {
+        const [event, ...eventArgs] = JSON.parse(msg);
+
+        remoteEvents.emit(event, phone, ...eventArgs);
+    }
+});
 
 const PhoneAccount = require('../models/phoneAccount');
 const BillingPlan = require('../models/billingPlan');
@@ -10,108 +25,166 @@ const Call = require('../models/call');
 
 const processCall = require('../billing/processCall');
 
-const registry = new Map()
-
 const PhoneStates = {
     INVALID : 'invalid',
     NOT_IN_CALL : 'not_in_call',
     CALL_INIT_OUTGOING : 'call_init_outgoing',
     CALL_INIT_INCOMING : 'call_init_incoming',
-    CALL_INIT_INCOMING_ACKNOWLEDGED : 'call_init_incoming_acknowledged',
     CALL_INIT_CREATING_DOC : 'call_init_creating_doc',
     CALL_ACTIVE : 'call_active'
 }
 Object.freeze(PhoneStates);
 
+const BASIC_EMIT = 'basic_emit';
+const CALL_REQUEST = 'call_request';
+const CALL_REFUSED = 'call_refused';
 const CALL_NOT_POSSIBLE = 'call_not_possible';
 const BUSY = 'busy';
+const NO_RECIPIENT = 'no_recipient';
 const CALL_CANCELLED = 'call_cancelled';
+const CALL_CONNECTED = 'call_connected';
 const CALL_ENDED = 'call_ended';
+const CLOSE_CALL_ACK = 'close_call_ack';
+
+const UPDATE_PHONE_NUMBER = 'update_phone_number';
+const SUSPEND_PHONE = 'suspend_phone';
+const UNSUSPEND_PHONE = 'unsuspend_phone';
+
+const ACCOUNT_ID = 'accountId';
+const IS_VALID = 'isValid';
+const CALL_ID = 'callId';
+const CALL_BP_ID = 'callBpId';
+
+async function getPhone(phoneNumber, queryRemote = true) {
+    const otherPhoneKey = getKey(phoneNumber);
+    let otherPhone = localRegistry.get(otherPhoneKey);
+    if (!otherPhone) {
+        if (queryRemote) {
+            const otherPhoneData = await redisClient.hgetall(otherPhoneKey);
+            
+            if (otherPhoneData[ACCOUNT_ID]) {
+                otherPhone = new RemotePhone(phoneNumber, otherPhoneData);
+            }
+        }
+        else {
+            // looking up remote phone data isn't needed when on the receiving end of a call
+            otherPhone = new RemotePhone(phoneNumber, {});
+        }
+    }
+    return otherPhone;
+}
 
 class Phone {
     constructor(socket) {
         this.socket = socket;
         this.phoneState = socket.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
         this.phoneNumber = socket.phoneNumber;
+        this.key = getKey(this.phoneNumber);
         this.accountId = socket.accountId;
         this.callPartner = null;
+        this.callPartnerConfirmed = false;
         this.billId = null;
         this.billingPlanId = null;
         this.callDoc = null;
+        this.callCloseTimer = null;
+    }
+
+    get isValid() {
+        return this.phoneState !== PhoneStates.INVALID;
+    }
+
+    get isOnCall() {
+        return this.phoneState === PhoneStates.CALL_INIT_INCOMING ||
+            this.phoneState === PhoneStates.CALL_INIT_OUTGOING ||
+            this.phoneState === PhoneStates.CALL_INIT_CREATING_DOC ||
+            this.phoneState ===  PhoneStates.CALL_ACTIVE;
+    }
+
+    emit(...args) {
+        this.socket.emit(...args);
+    }
+
+    async initRemote() {
+        const hsetArgs = [this.key, 
+            ACCOUNT_ID, this.accountId, 
+            IS_VALID, !(this.phoneState === PhoneStates.INVALID)
+        ];
+        if (this.callDoc) {
+            hsetArgs.push(CALL_ID, this.callDoc.id);
+        }
+        if (this.billingPlanId) {
+            hsetArgs.push(CALL_BP_ID, this.billingPlanId);
+        }
+        return Promise.all([
+            redisClient.hset(...hsetArgs),
+            subClient.subscribe(this.key)
+        ]);
+    }
+
+    async clearRemote() {
+        return Promise.all([
+            redisClient.del(this.key),
+            subClient.unsubscribe(this.key)
+        ]);
     }
 
     async onDisconnect() {
-        if (this.phoneNumber) {
-            registry.delete(this.phoneNumber);
-        }
+        localRegistry.delete(this.key);
         
         switch (this.phoneState) {
             case PhoneStates.CALL_INIT_OUTGOING :
-                this.callPartner.socket.emit(CALL_CANCELLED);
-                this.resetCallProperties();
+                this.callPartner.onCallCancelled(this.phoneNumber);
                 break;
             case PhoneStates.CALL_INIT_INCOMING :
-            case PhoneStates.CALL_INIT_INCOMING_ACKNOWLEDGED :
-                this.callPartner.socket.emit(CALL_NOT_POSSIBLE, 'callee_disconnected');
-                this.resetCallProperties();
+                this.callPartner.onCallRefusedPartner(this.phoneNumber, 'callee_disconnected');
                 break;
-            case PhoneStates.CALL_INIT_CREATING_DOC:
+            // case PhoneStates.CALL_INIT_CREATING_DOC:
+                // onCallAccepted will handle this case
             case PhoneStates.CALL_ACTIVE :
                 await this.closeCall();
                 break;
             default :
         }
-        //this.phoneState = PhoneStates.INVALID;
+        
+        this.phoneState = PhoneStates.INVALID;
+        await this.clearRemote();
     }
 
     async onMakeCall(phoneNumber) {
-        //console.log('In make_call');
+        //console.log(`In make_call (${this.phoneNumber})`);
         try {
             if (this.phoneState === PhoneStates.INVALID) {
-                if (!this.accountId) {
-                    this.socket.emit(CALL_NOT_POSSIBLE, 'not_registered');
-                }
-                else {
-                    this.socket.emit(CALL_NOT_POSSIBLE, 'not_active');
-                }
-                //console.log('make_call failed due to caller not being registered')
+                this.socket.emit(CALL_NOT_POSSIBLE, 'not_active');
+                //console.log('make_call failed (caller suspended)');
                 return;
-            }
-            else if (this.phoneState === PhoneStates.CALL_INIT_INCOMING) {
-                /* This is a race condition where another phone is trying to call 
-                 * this one at the same time as this one makes a call. */
-                this.callPartner.socket.emit(CALL_NOT_POSSIBLE, BUSY);
-                this.resetCallProperties();
             }
             else if (this.phoneState !== PhoneStates.NOT_IN_CALL) {
                 this.socket.emit(CALL_NOT_POSSIBLE, 'already_in_call');
+                //console.log('make_call failed (caller already in call)');
+                return;
+            }
+            else if (phoneNumber === this.phoneNumber) {
+                this.socket.emit(CALL_NOT_POSSIBLE, 'dialed_self');
+                //console.log('make_call failed (dialed self)');
                 return;
             }
     
-            let otherPhone = registry.get(phoneNumber);
-            if (!otherPhone || otherPhone.phoneState === PhoneStates.INVALID) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'no_recipient');
-                // console.log('make_call failed: no recipient found');
+            const otherPhone = await getPhone(phoneNumber);
+            
+            if (!otherPhone || !otherPhone.isValid) {
+                this.socket.emit(CALL_NOT_POSSIBLE, NO_RECIPIENT);
+                //console.log('make_call failed no() recipient found)');
                 return;
             }
-            else if (otherPhone.phoneState !== PhoneStates.NOT_IN_CALL) {
+            else if (otherPhone.isOnCall) {
                 // convenience check before querying the database for phone account status
                 this.socket.emit(CALL_NOT_POSSIBLE, BUSY);
-                // console.log('make_call failed: recipient busy');
+                //console.log('make_call failed (recipient busy)');
                 return;
             }
-            else if (otherPhone === this) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'dialed_self');
-                // console.log('make_call failed: dialed self');
-                return;
-            }
-
-            /* Set the phone state here in case another phone tries calling this one
-            * while the database query is ongoing */
-            this.phoneState = PhoneStates.CALL_INIT_OUTGOING;
-
+            
             const phoneAccounts = await PhoneAccount.find({ 
-                _id : { $in : [this.accountId, otherPhone.accountId]}
+                _id : { $in : [this.accountId, otherPhone.accountId] }
             }).exec();
 
             // validate the query results
@@ -145,51 +218,54 @@ class Phone {
                 this.socket.emit(CALL_NOT_POSSIBLE, 'error');
                 return;
             } else if (!phoneAccounts[calleeIndex].isActive || phoneAccounts[calleeIndex].isSuspended) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'no_recipient');
+                //console.log('make_call failed because callee is retired or suspended');
+                this.socket.emit(CALL_NOT_POSSIBLE, NO_RECIPIENT);
                 return;
             }
             
-            // double check this now that the db query has run
-            if (otherPhone.phoneState !== PhoneStates.NOT_IN_CALL) {
-                this.socket.emit(CALL_NOT_POSSIBLE, BUSY);
-                return;
-            }
-        
-            //this.phoneState = PhoneStates.CALL_INIT_OUTGOING;
+            this.phoneState = PhoneStates.CALL_INIT_OUTGOING;
             this.callPartner = otherPhone;
             this.billId = phoneAccounts[callerIndex].currentBill;
             this.billingPlanId = phoneAccounts[callerIndex].billingPlan;
-            otherPhone.phoneState = PhoneStates.CALL_INIT_INCOMING;
-            otherPhone.callPartner = this;
-            otherPhone.socket.emit('call_request', this.phoneNumber);
-            // console.log('make_call passed on call request');
+            this.callPartner.emit(CALL_REQUEST, this.phoneNumber);
+            //console.log('make_call passed on call request');
         }
         catch (err) {
-            //console.log(`make_call failed due to an error: ${err}`);
+            console.log(`make_call failed due to an error: ${err}`);
             this.socket.emit(CALL_NOT_POSSIBLE, 'error');
             this.resetCallProperties();
         }
     }
 
-    onCallAcknowledged() {
-        if (this.phoneState !== PhoneStates.CALL_INIT_INCOMING) {
-            this.socket.emit('error', 'invalid_call_acknowledged');
+    async onCallAcknowledged(phoneNumber) {
+        const otherPhone = await getPhone(phoneNumber, false);
+
+        if (this.phoneState === PhoneStates.INVALID) {
+            // the phone got suspended
+            this.socket.emit(CALL_CANCELLED);
+            otherPhone.onCallRefusedPartner(phoneNumber, NO_RECIPIENT);
+            return;
+
+        }
+        else if (this.phoneState !== PhoneStates.NOT_IN_CALL) {
+            // this shouldn't happen
+            if (this.callPartner && otherPhone.key !== this.callPartner.key) {
+                otherPhone.onCallRefusedPartner(phoneNumber, BUSY);
+            }
             return;
         }
 
-        this.phoneState = PhoneStates.CALL_INIT_INCOMING_ACKNOWLEDGED;
-        this.callPartner.socket.emit('callee_ringing');
+        this.phoneState = PhoneStates.CALL_INIT_INCOMING;
+        this.callPartner = otherPhone;
+        this.callPartner.emit('callee_ringing');
     }
 
     async onCallAccepted() {
-        if (this.phoneState === PhoneStates.CALL_INIT_INCOMING ||
-            this.phoneState === PhoneStates.CALL_INIT_INCOMING_ACKNOWLEDGED) {
-
+        if (this.phoneState === PhoneStates.CALL_INIT_INCOMING) {
             this.phoneState = PhoneStates.CALL_ACTIVE;
-            this.callPartner.socket.emit('call_connected');
+            this.callPartner.onPartnerConnected(this.phoneNumber);
         }
-        else if (this.phoneState === PhoneStates.CALL_INIT_OUTGOING &&
-                    this.callPartner.phoneState === PhoneStates.CALL_ACTIVE) {
+        else if (this.phoneState === PhoneStates.CALL_INIT_OUTGOING && this.callPartnerConfirmed) {
             try {
                 // Persist to DB
                 this.phoneState = PhoneStates.CALL_INIT_CREATING_DOC;
@@ -200,16 +276,12 @@ class Phone {
                 //console.log('Saving from onCallAccepted');
                 await callDoc.save();
 
-                if (this.callPartner.phoneState !== PhoneStates.CALL_ACTIVE) {
-                    /* The call was disrupted (e.g. cancelled, disconnected, automatically suspended)
-                     * on the callee's end while creating the document */
-                    this.resetCallProperties(false);
-                    await callDoc.remove();
-                    return;
-                }
-                else if (this.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
-                    // the call was disrupted on the caller's end
-                    this.callPartner.socket.emit(CALL_CANCELLED);
+                if (this.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
+                    // someone either disconnected, or was suspended
+                    if (this.callPartner) {
+                        // callPartner can be empty if the callee hung up immediately
+                        this.callPartner.onCallCancelled(this.phoneNumber);
+                    }
                     this.resetCallProperties();
                     await callDoc.remove();
                     return;
@@ -217,18 +289,19 @@ class Phone {
                 
                 this.phoneState = PhoneStates.CALL_ACTIVE;
                 this.callDoc = callDoc;
-                this.callPartner.callDoc = callDoc;
+                this.callPartner.emit(CALL_CONNECTED);
                 
-                this.callPartner.socket.emit('call_connected');
+                await redisClient.multi()
+                    .hset(this.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
+                    .hset(this.callPartner.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
+                    .exec();
             }
             catch (err) {
                 if (this.phoneState === PhoneStates.CALL_ACTIVE) {
                     //console.log('Calling closeCall from onCallAccepted (error case)');
                     await this.closeCall();
                 }
-                else {
-                    this.resetCallProperties();
-                }
+                this.resetCallProperties();
             }
         }
         else {
@@ -236,104 +309,241 @@ class Phone {
         }
     }
 
-    onCallRefused(reason) {
-        if (this.phoneState === PhoneStates.CALL_INIT_INCOMING ||
-            this.phoneState === PhoneStates.CALL_INIT_INCOMING_ACKNOWLEDGED) {
-            
-            this.callPartner.socket.emit(CALL_NOT_POSSIBLE, reason);
+    async onCallRefusedSelf(phoneNumber, reason) {
+        let otherPhone;
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
+            otherPhone = this.callPartner;
             this.resetCallProperties();
         }
-        else if (this.phoneState !== PhoneStates.CALL_INIT_OUTGOING) {
-            /* This is caused by another phone calling this one at the same time as this
-             * one is making a call.  It is actually handled by 'make_call'. */
-            // this.socket.emit('error', 'invalid_call_refused');
+        else {
+            otherPhone = await getPhone(phoneNumber, false);
+        }
+        otherPhone.onCallRefusedPartner(this.phoneNumber, reason);
+    }
+
+    onCallRefusedPartner(phoneNumber, reason) {
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
+            this.resetCallProperties();
+            this.socket.emit(CALL_NOT_POSSIBLE, reason);
+        }
+    }
+
+    onCallCancelled(phoneNumber) {
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
+            this.resetCallProperties();
+            this.socket.emit(CALL_CANCELLED);
+        }
+    }
+
+    onPartnerConnected(phoneNumber) {
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
+            this.callPartnerConfirmed = true;
+            this.socket.emit(CALL_CONNECTED);
         }
     }
 
     async onHangUp() {
         switch (this.phoneState) {
-            case PhoneStates.CALL_INIT_CREATING_DOC :
             case PhoneStates.CALL_ACTIVE :
-                //console.log('Calling closeCall from onHangUp');
                 await this.closeCall();
+                if (!this.callCloseTimer) {
+                    this.resetCallProperties();
+                }
+                break;
+            case PhoneStates.CALL_INIT_CREATING_DOC :
+                // the onCallAccepted handler will do the rest
+                this.resetCallProperties(false);
                 break;
             case PhoneStates.CALL_INIT_OUTGOING :
-                this.callPartner.socket.emit(CALL_CANCELLED);
+                this.callPartner.onCallCancelled(this.phoneNumber);
                 this.resetCallProperties();
                 break;
             case PhoneStates.CALL_INIT_INCOMING :
-            case PhoneStates.CALL_INIT_INCOMING_ACKNOWLEDGED :
                 // this shouldn't happen, but just in case...
-                this.callPartner.socket.emit(CALL_NOT_POSSIBLE, 'callee_rejected');
+                this.callPartner.onCallRefusedPartner(this.phoneNumber, 'error');
                 this.resetCallProperties();
                 break;
+            default :
+                // redis properties shouldn't be set, so no need to clear them
+                return;
         }
     }
 
-    async closeCall() {
+    async closeCall(notifyPartner = true, endDate = new Date()) {
         //console.log('In closeCall');
         //console.log(`this.phoneNumber = ${this.phoneNumber})`);
         
-        if (this.callPartner) {
-            this.callPartner.socket.emit(CALL_ENDED);
-        }
-    
-        /* this condition may be false if the callee hangs up or disconnects immediately 
-         * after accepting, but before the caller can be connected */
+        // callDoc should initially only be set on the caller
         if (this.callDoc) {
             try {
+                if (notifyPartner) {
+                    this.callPartner.onCallEndedRemotely(this.phoneNumber);
+                }
                 // Process any charges on the call, then persist to the DB
-                this.callDoc.endDate = Date.now();
-                const bpId = this.billingPlanId || this.callPartner.billingPlanId;  // this should only be set on the caller
+                this.callDoc.endDate = endDate;
+                const bpId = this.billingPlanId;
                 const billingPlan = await BillingPlan.findById(bpId).exec();
                 processCall(this.callDoc, billingPlan);
+                await this.callDoc.save();
+                await redisClient.multi()
+                    .hdel(this.key, CALL_ID, CALL_BP_ID)
+                    .hdel(this.callPartner.key, CALL_ID, CALL_BP_ID)
+                    .exec();
             }
             catch (err) {
-                // retry?
-            }
-            finally {
-                try {
-                    //console.log('Saving from closeCall');
-                    await this.callDoc.save();
-                }
-                catch (err) {
-                }
+                console.log(err);
             }
         }
-    
-        this.resetCallProperties();
+        else {
+            /* If the callee hung up, ask the caller's server to process the call.  However, if no
+             * acknowledgement is received, look up the call details and process the call recursively. */
+            this.callCloseTimer = setTimeout(async () => {
+                this.callCloseTimer = null;
+                try {
+                    const external = await redisClient.hgetall(this.key);
+                    this.callDoc = await Call.findById(external[CALL_ID]).exec();
+                    this.billingPlanId = external[CALL_BP_ID];
+                    await this.closeCall(false, endDate);
+                    this.resetCallProperties();
+                }
+                catch (err) {
+                    // ?
+                }
+            }, 5000); // the timeout value could be changed
+            await this.callPartner.onCallEndedRemotely(this.phoneNumber, true);
+        }
+    }
+
+    async onCallEndedRemotely(phoneNumber, ack = false) {
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
+            this.socket.emit(CALL_ENDED);
+            if (ack) {
+                // the remote server wants this one to process the call
+                await this.closeCall(false);
+                this.callPartner.onCloseCallAcknowledgement(this.phoneNumber);
+            }
+            this.resetCallProperties();
+        }
+    }
+
+    onCloseCallAcknowledgement(phoneNumber) {
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber && this.callCloseTimer) {
+            clearTimeout(this.callCloseTimer);
+            this.callCloseTimer = null;
+            this.resetCallProperties();
+        }
     }
 
     resetCallProperties(resetPartner = true) {
-        if (resetPartner && this.callPartner && 
-                this.callPartner.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
-            this.callPartner.resetCallProperties(false);
-        }
-        if (this.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
-            this.phoneState = this.phoneState === PhoneStates.INVALID ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
+        this.phoneState = this.phoneState === PhoneStates.INVALID ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
+        if (resetPartner) {
             this.callPartner = null;
-            this.billId = null;
-            this.billingPlanId = null;
-            this.callDoc = null;
         }
+        this.callPartnerConfirmed = false;
+        this.billId = null;
+        this.billingPlanId = null;
+        this.callDoc = null;
     }
 
     onTalk(msg) {
         // console.log(`talk event from ${socket.phoneNumber} to ${socket.callPartner.phoneNumber}.  msg = ${msg}`)
-        if (this.phoneState === PhoneStates.CALL_ACTIVE && this.callPartner &&
-            this.callPartner.phoneState === PhoneStates.CALL_ACTIVE) {
-
-            this.callPartner.socket.emit('talk', msg);
+        if (this.phoneState === PhoneStates.CALL_ACTIVE && this.callPartner) {
+            this.callPartner.emit('talk', msg);
             // console.log('talk event sent')
         }
     }
 }
 
+function parseBoolean(bool) {
+    return !(bool == false || bool === 'false');
+}
+
+class RemotePhone {
+    constructor(phoneNumber, remotePhoneData) {
+        this.phoneNumber = phoneNumber;
+        this.key = getKey(this.phoneNumber);
+        this.accountId = remotePhoneData[ACCOUNT_ID];
+        this.isValid = parseBoolean(remotePhoneData[IS_VALID]);
+        this.isOnCall = !!remotePhoneData[CALL_ID];
+    }
+
+    emit(...args) {
+        redisClient.publish(this.key, JSON.stringify([BASIC_EMIT, ...args]));
+    }
+
+    onCallRefusedPartner(phoneNumber, reason) {
+        redisClient.publish(this.key, JSON.stringify([CALL_REFUSED, phoneNumber, reason]));
+    }
+
+    onPartnerConnected(phoneNumber) {
+        redisClient.publish(this.key, JSON.stringify([CALL_CONNECTED, phoneNumber]));
+    }
+
+    onCallCancelled(phoneNumber) {
+        redisClient.publish(this.key, JSON.stringify([CALL_CANCELLED, phoneNumber]));
+    }
+
+    onCallEndedRemotely(phoneNumber, ack = false) {
+        redisClient.publish(this.key, JSON.stringify([CALL_ENDED, phoneNumber, ack]));
+    }
+
+    onCloseCallAcknowledgement(phoneNumber) {
+        redisClient.publish(this.key, JSON.stringify([CLOSE_CALL_ACK, phoneNumber]));
+    }
+}
+
+remoteEvents.on(BASIC_EMIT, (phone, ...args) => {
+    phone.emit(...args);
+});
+
+remoteEvents.on(CALL_REFUSED, (phone, phoneNumber, reason) => {
+    phone.onCallRefusedPartner(phoneNumber, reason);
+});
+
+remoteEvents.on(CALL_CANCELLED, (phone, phoneNumber) => {
+    phone.onCallCancelled(phoneNumber);
+});
+
+remoteEvents.on(CALL_CONNECTED, (phone, phoneNumber) => {
+    phone.onPartnerConnected(phoneNumber);
+});
+
+remoteEvents.on(CALL_ENDED, (phone, phoneNumber, ack) => {
+    phone.onCallEndedRemotely(phoneNumber, ack);
+});
+
+remoteEvents.on(CLOSE_CALL_ACK, (phone, phoneNumber) => {
+    phone.onCloseCallAcknowledgement(phoneNumber);
+});
+
+remoteEvents.on(UPDATE_PHONE_NUMBER, async (phone, newPhoneNumber) => {
+    const newKey = getKey(newPhoneNumber);
+    localRegistry.delete(phone.key);
+    await phone.clearRemote();
+
+    phone.phoneNumber = newPhoneNumber;
+    phone.key = newKey;
+    localRegistry.set(newKey, phone);
+    await phone.initRemote();
+});
+
+remoteEvents.on(SUSPEND_PHONE, async (phone) => {
+    const prevState = phone.phoneState;
+    phone.phoneState = PhoneStates.INVALID;
+    if (!(prevState === PhoneStates.INVALID || prevState === PhoneStates.NOT_IN_CALL)) {
+        await phone.onHangUp();
+    }
+    await redisClient.hset(phone.key, IS_VALID, false);
+});
+
+remoteEvents.on(UNSUSPEND_PHONE, (phone) => {
+    phone.phoneState = PhoneStates.NOT_IN_CALL;
+    redisClient.hset(phone.key, IS_VALID, true);
+})
+
 module.exports.init = function(server) {
     io = require('socket.io')(server, { serveClient : false });
-    const redisAdapter = require('socket.io-redis');
-    io.adapter(redisAdapter(process.env.REDIS_CONN));
-
+    
     io.use(async (socket, next) => {
         const phoneNumber = socket.handshake.auth.phoneNumber;
         if (!phoneNumber) {
@@ -352,55 +562,36 @@ module.exports.init = function(server) {
         socket.phoneNumber = phoneNumber;
         socket.accountSuspended = phoneAccount.isSuspended;
         next();
-    })
+    });
 
     io.on('connection', (socket) => {
-        const phone = new Phone(socket);    
+        //console.log('phone connecting:');
+        const phone = new Phone(socket);
+        //console.log(`   phone number: ${phone.phoneNumber}`)    ;
         
         socket.on('disconnect', () => phone.onDisconnect());
         socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
-        socket.on('call_acknowledged', () => phone.onCallAcknowledged());
+        socket.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledged(phoneNumber));
         socket.on('call_accepted', () => phone.onCallAccepted());
         socket.on('hang_up', () => phone.onHangUp());
-        socket.on('call_refused', (reason) => phone.onCallRefused(reason));
+        socket.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
         socket.on('talk', (msg) => phone.onTalk(msg));
 
-        registry.set(phone.phoneNumber, phone);
         socket.emit('registered', phone.phoneNumber);
-    })
+        localRegistry.set(phone.key, phone);
+        phone.initRemote();
+    });
 }
 
 module.exports.updatePhoneNumber = function(oldVal, newVal) {
-    const phone = registry.get(oldVal);
-    if (phone) {
-        const other = registry.get(newVal);
-        if (other) {
-            throw new Error('The updated phone number is already in use.');
-        }
-
-        phone.phoneNumber = newVal;
-        registry.delete(oldVal);
-        registry.set(newVal, phone);
-    }
+    const oldKey = getKey(oldVal);
+    redisClient.publish(oldKey, JSON.stringify([UPDATE_PHONE_NUMBER, newVal]));
 }
 
 module.exports.suspendPhone = async function(phoneNumber) {
-    const phone = registry.get(phoneNumber);
-    if (!phone) {
-        // This isn't necessarily an error.  The phone could simply not be active/registered
-        return;
-    }
-
-    const prevState = phone.phoneState;
-    phone.phoneState = PhoneStates.INVALID;
-    if (!(prevState === PhoneStates.INVALID || prevState === PhoneStates.NOT_IN_CALL)) {
-        await phone.onHangUp();
-    }
+    redisClient.publish(getKey(phoneNumber), JSON.stringify([SUSPEND_PHONE]));    
 }
 
 module.exports.unsuspendPhone = function(phoneNumber) {
-    const phone = registry.get(phoneNumber);
-    if (phone && phone.phoneState === PhoneStates.INVALID) {
-        phone.phoneState = PhoneStates.NOT_IN_CALL;
-    }
+    redisClient.publish(getKey(phoneNumber), JSON.stringify([UNSUSPEND_PHONE]));
 }

@@ -41,7 +41,7 @@ class PhoneEmulator(Thread) :
         self._sio.on('call_not_possible', self._socket_call_not_possible_event)
         #self._sio.on('callee_busy', self._socket_callee_busy_event)
         #self._sio.on('callee_not_available', self._socket_callee_not_available_event)
-        self._sio.on('call_timeout', self._socket_call_timeout_event)
+        #self._sio.on('call_timeout', self._socket_call_timeout_event)
         self._sio.on('call_cancelled', self._socket_call_cancelled_event)
         self._sio.on('call_connected', self._socket_call_connected_event)
         self._sio.on('call_ended', self._socket_call_ended_event)
@@ -155,6 +155,8 @@ class PhoneEmulator(Thread) :
             
             # print(event)
             if event[0] == 'shutdown' :
+                if self._emit_hangup :
+                    self._sio.emit('hang_up')
                 break
             else :
                 handler = self._state.get(event[0])
@@ -170,8 +172,11 @@ class PhoneEmulator(Thread) :
         return self._unregistered
     
     def _server_connect_error_event(self, event) :
+        error = event[1]
+        if isinstance(error, dict) and 'message' in error :
+            error = error['message']
         self._sound = PhoneSounds.SILENT
-        self._call_dialogue = f'An error occurred ({event[1]["message"]}).  Please contact your systems administrator for assistance.'
+        self._call_dialogue = f'An error occurred ({error}).  Please contact your systems administrator for assistance.'
         self._notify_guis()
         self._events.put(('shutdown',))
         return self._registration_failed
@@ -313,7 +318,7 @@ class PhoneEmulator(Thread) :
     def _incoming_call_event(self, event) :
         self._sound = PhoneSounds.RINGING
         self._number_dialed = event[1]
-        self._sio.emit('call_acknowledged')
+        self._sio.emit('call_acknowledged', event[1])
         self._notify_guis()
         self._call_timer = Timer(15.0, self._incoming_call_timeout)
         self._call_timer.start()
@@ -324,13 +329,13 @@ class PhoneEmulator(Thread) :
         self._events.put(('call_timeout',))
 
     def _invalid_incoming_call_event(self, event) :
-        self._sio.emit('call_refused', 'busy')
+        self._sio.emit('call_refused', (event[1], 'busy'))
         return self._state
 
     def _incoming_call_timeout_event(self, event) :
         self._sound = PhoneSounds.SILENT
-        self._sio.emit('call_refused', 'timeout')
-        self._notify_guis()
+        self._sio.emit('call_refused', (self._number_dialed, 'timeout'))
+        self._number_dialed = ''
         self._call_timer = None
         self._notify_guis()
         return self._on_hook_idle
@@ -382,8 +387,10 @@ class PhoneEmulator(Thread) :
         self._events.put(('callee_ringing',))
 
     def _socket_call_not_possible_event(self, reason) :
-        if reason == 'busy' or reason == 'timeout' :
+        if reason == 'busy' :
             self._events.put(('callee_busy',))
+        elif reason == 'timeout' :
+            self._events.put(('call_timeout',))
         else :
             self._events.put(('callee_not_available',))
 
