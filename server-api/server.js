@@ -67,8 +67,13 @@ const server = https.createServer(options, app);
 const phoneManager = require('./phone/phoneManager');
 phoneManager.init(server);
 
-const cron = require('node-cron');
-const { processBills } = require('./billing/processBills');
-cron.schedule('0 2 * * *', processBills);
+if (process.env.PROCESS_BILLS) {
+    /* This section is largely a prototype.  It might want to be turned into a separate process 
+     * and run through regular cron.  Alternately, it could run in worker threads.  N.B. the cron 
+     * time is in GMT, NOT local time */
+    const cron = require('node-cron');
+    const { processBills } = require('./billing/processBills');
+    cron.schedule('0 5 * * *', processBills);
+}
 
 server.listen(port, () => console.log('Listening on port ' + port));
