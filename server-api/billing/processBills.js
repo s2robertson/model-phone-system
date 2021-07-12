@@ -9,7 +9,7 @@ const { centsFromMoneyString, moneyStringFromCents } = require('../helpers/strin
 const unpaidBillsLimit = 3;
 
 async function processBills() {
-    console.log('Running processBills')
+    //console.log('Running processBills')
     const now = new Date();
     const lastMonth = new Date(now.getTime());
     lastMonth.setMonth(lastMonth.getMonth() - 1);
@@ -34,7 +34,7 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
         await bill.populate('phoneAccount').execPopulate();
         _paDoc = bill.phoneAccount;
     }
-    console.log(`In processBill for phone account ${_paDoc._id}, ${_paDoc.phoneNumber}`);
+    //console.log(`In processBill for phone account ${_paDoc._id}, ${_paDoc.phoneNumber}`);
 
     /* Double check that billing plans are populated.  The processBills method populates billing plans
      * en masse for efficiency's sake, but this method can also be called when closing an account */
@@ -54,7 +54,7 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
                 billingPlan : _paDoc.billingPlan
             }]
         });
-        console.log(`${_paDoc.phoneNumber}: Creating new bill`);
+        //console.log(`${_paDoc.phoneNumber}: Creating new bill`);
         await nextBill.save();
 
         _paDoc.currentBill = nextBill._id;
@@ -71,12 +71,12 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
     // Populate calls now that the update has run
     // N.B. this is sorted automatically by the bill schema
     await bill.populate('calls').execPopulate();
-    console.log(`${_paDoc.phoneNumber}: found ${bill.calls.length} calls`);
+    //console.log(`${_paDoc.phoneNumber}: found ${bill.calls.length} calls`);
 
     bill.endDate = endDate;
     // lastBpEntry.endDate could be set already if the account is suspended
     if (!lastBpEntry.endDate) {
-        console.log(`${_paDoc.phoneNumber}: Setting last billing plan entry to ${endDate}`);
+        //console.log(`${_paDoc.phoneNumber}: Setting last billing plan entry to ${endDate}`);
         lastBpEntry.endDate = endDate;
     }
 
@@ -86,7 +86,7 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
         const pricePerMonth = bill.billingPlans[0].billingPlan.pricePerMonth;
         bill.billingPlans[0].amountDue = pricePerMonth;
         totalDue = centsFromMoneyString(pricePerMonth);
-        console.log(`${_paDoc.phoneNumber}: Single billing plan with price ${totalDue}`);
+        //console.log(`${_paDoc.phoneNumber}: Single billing plan with price ${totalDue}`);
     }
     else {
         /* If the customer changed billing plans mid billing period, pro-rate
@@ -102,42 +102,42 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
         }
         const billDuration = endOfMonth.getTime() - billStartTime;
 
-        console.log(`${_paDoc.phoneNumber}: Multiple (${bill.billingPlans.length}) billing plans`);
+        //console.log(`${_paDoc.phoneNumber}: Multiple (${bill.billingPlans.length}) billing plans`);
         for (const entry of bill.billingPlans) {
             const bpPricePerMonth = centsFromMoneyString(entry.billingPlan.pricePerMonth)
             const bpDuration = entry.endDate.getTime() - entry.startDate.getTime();
             const entryDue = Math.round(bpPricePerMonth * bpDuration / billDuration);
             entry.amountDue = moneyStringFromCents(entryDue);
             totalDue += entryDue;
-            console.log(`${_paDoc.phoneNumber}: Billing plan with partial price ${entry.amountDue}`);
+            //console.log(`${_paDoc.phoneNumber}: Billing plan with partial price ${entry.amountDue}`);
         }
     }
 
-    console.log(`${_paDoc.phoneNumber}: About to add calls`);
+    //console.log(`${_paDoc.phoneNumber}: About to add calls`);
     let bpIndex = 0;
     for (const call of bill.calls) {
-        console.log(`${_paDoc.phoneNumber}: adding call ${call}`);
+        //console.log(`${_paDoc.phoneNumber}: adding call ${call}`);
         while (bill.billingPlans[bpIndex].endDate < call.startDate) {
-            console.log(`${_paDoc.phoneNumber}: skipping billing plan entry ${bill.billingPlans[bpIndex]}`);
+            //console.log(`${_paDoc.phoneNumber}: skipping billing plan entry ${bill.billingPlans[bpIndex]}`);
             bpIndex++;
         }
-        console.log(`${_paDoc.phoneNumber}: found appropriate billing plan`);
+        //console.log(`${_paDoc.phoneNumber}: found appropriate billing plan`);
         if (!call.charges || call.charges.length === 0) {
             /* The billing plan could have been changed since the call was made, so 
              * it's better to process immediately.  This is just here as a fall back. */
-            console.log(`${_paDoc.phoneNumber}: processing call`);
+            //console.log(`${_paDoc.phoneNumber}: processing call`);
             processCall(call, bill.billingPlans[bpIndex].billingPlan);
             await call.save();
         }
         for (const charge of call.charges) {
-            console.log(`${_paDoc.phoneNumber}: adding charge ${charge}`);
+            //console.log(`${_paDoc.phoneNumber}: adding charge ${charge}`);
             totalDue += charge.duration * centsFromMoneyString(charge.rate);
         }
     }
 
     bill.totalDue = moneyStringFromCents(totalDue);
-    console.log(`${_paDoc.phoneNumber}: Total due = ${bill.totalDue}`);
-    console.log(`${_paDoc.phoneNumber}: About to save bill`)
+    //console.log(`${_paDoc.phoneNumber}: Total due = ${bill.totalDue}`);
+    //console.log(`${_paDoc.phoneNumber}: About to save bill`)
 
     // When closing the account, saving is the caller's responsibility
     if (!closingAccount) {
@@ -172,10 +172,10 @@ async function processBill(bill, endDate, phoneAccountDoc = null, closingAccount
 
     // if phone account was provided explicitly, saving is the caller's responsibility
     if (_paDoc.isModified() && !phoneAccountDoc) {
-        console.log(`${_paDoc.phoneNumber}: Saving phone account`);
+        //console.log(`${_paDoc.phoneNumber}: Saving phone account`);
         await bill.phoneAccount.save();
     }
-    console.log(`${_paDoc.phoneNumber}: Finished processing bill`);
+    //console.log(`${_paDoc.phoneNumber}: Finished processing bill`);
 }
 
 module.exports = {
