@@ -134,6 +134,7 @@ db.bills.insertMany([
     {
         _id: johnSmithBillId,
         phoneAccount: johnSmithPhoneId,
+        startDate: startDate,
         billingPlans: [
             {
                 billingPlan: basicBpId,
@@ -144,6 +145,7 @@ db.bills.insertMany([
     {
         _id: jackBlackBillId,
         phoneAccount: jackBlackPhoneId,
+        startDate: startDate,
         billingPlans: [
             {
                 billingPlan: discountBpId,
@@ -154,6 +156,7 @@ db.bills.insertMany([
     {
         _id: janeDoeBillId,
         phoneAccount: janeDoePhoneId,
+        startDate: startDate,
         billingPlans: [
             {
                 billingPlan: discountBpId,
