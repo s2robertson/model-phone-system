@@ -12,11 +12,13 @@ function useFetchedData(initialUrl, initialData) {
 
     // refresh the fetched data whenever url is updated
     useEffect(() => {
+        let fetchValid = true;
         const doFetch = async () => {
             try {
                 const result = await fetch(url);
                 const resultData = await result.json();
 
+                if (!fetchValid) return;
                 if (result.ok) {
                     setData(resultData);
                     setErrorMessage(null);
@@ -26,7 +28,9 @@ function useFetchedData(initialUrl, initialData) {
                 }
             }
             catch (err) {
-                setErrorMessage(err.message);
+                if (fetchValid) {
+                    setErrorMessage(err.message);
+                }
             }
         };
 
@@ -35,6 +39,10 @@ function useFetchedData(initialUrl, initialData) {
         }
         else {
             setErrorMessage(null);
+        }
+        
+        return () => {
+            fetchValid = false;
         }
     }, [url, loggedIn]);
 
