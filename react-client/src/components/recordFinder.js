@@ -44,7 +44,11 @@ function RecordFinder({ baseUrl, queryParams, mapFunc, chooseRecord, createNewMe
         chooseRecord(selectVal);
     }, [selectVal, chooseRecord]);
 
-    const [data, errorMessage, setUrl] = useFetchedData(null, []);
+    const {
+        data, 
+        errorMessage, 
+        setUrl
+    } = useFetchedData(null, []);
     useEffect(() => {
         setSelectVal('new');
     }, [data])

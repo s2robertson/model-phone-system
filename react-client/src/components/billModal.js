@@ -12,7 +12,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat('en', { dateStyle : 'short', t
 
 function BillModal({ show, phoneNumber, billList, billListError, onHide, animation=false }) {
     const [showingList, setShowingList] = useState(true);
-    const [billData, billError, fetchBill] = useFetchedData();
+    const {
+        data : billData, 
+        error : billError, 
+        setUrl : fetchBill
+    } = useFetchedData();
 
     // when the list of bills gets changed, default to showing it
     useEffect(() => {

@@ -46,7 +46,13 @@ function useFetchedData(initialUrl, initialData) {
         }
     }, [url, loggedIn]);
 
-    return [data, errorMessage, setUrl, setData];
+    return {
+        data, 
+        setData,
+        url,
+        setUrl,
+        errorMessage
+    };
 }
 
 export default useFetchedData;

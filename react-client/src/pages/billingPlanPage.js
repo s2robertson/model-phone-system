@@ -20,7 +20,12 @@ const emptyDoc = {
 
 function BillingPlanPage() {
     const [bpId, setBpId] = useState();
-    const [bpData, errorMessage, doFetch, setBpData] = useFetchedData(null, emptyDoc);
+    const {
+        data : bpData,
+        setData : setBpData,
+        errorMessage,
+        setUrl : doFetch
+    } = useFetchedData(null, emptyDoc);
 
     const saveCallback = useCallback((newData) => {
         setBpId(newData._id);

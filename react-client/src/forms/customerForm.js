@@ -57,7 +57,10 @@ const schema = Yup.object({
 function CustomerForm({ customerId, initialData, saveCallback, ...props }) {
     /* Get a list of billing plans, and incorporate the customer's billing plan(s) 
      * into it if necessary (caused by the customer having a deactivated plan) */
-    const [baseBillingPlans, bpErr] = useFetchedData('/api/billingPlans');
+    const {
+        data : baseBillingPlans, 
+        errorMessage : bpErr
+    } = useFetchedData('/api/billingPlans');
     const [billingPlanLists, setBpLists] = useState([]);
     useEffect(() => {
         //console.log(`In the bpLists effect hook.  baseBillingPlans=${JSON.stringify(baseBillingPlans)}`);
@@ -129,7 +132,11 @@ function CustomerForm({ customerId, initialData, saveCallback, ...props }) {
 
     // Phone accounts need to display a list of bills
     const [showingBillModal, setShowingBillModal] = useState(false);
-    const [billList, billListError, fetchBills] = useFetchedData();
+    const {
+        data : billList, 
+        erorMessage : billListError, 
+        setUrl : fetchBills
+    } = useFetchedData();
     const hideBillModalCallback = useCallback(() => setShowingBillModal(false), []);
     
     const [saveError, setSaveError] = useState(null);

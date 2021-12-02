@@ -24,7 +24,12 @@ const emptyDoc = {
 
 function CustomerPage(props) {
     const [customerId, setCustomerId] = useState();
-    const [customerData, errorMessage, doFetch, setCustomerData] = useFetchedData(null, emptyDoc);
+    const {
+        data : customerData,
+        setData : setCustomerData,
+        errorMessage, 
+        setUrl : doFetch
+    } = useFetchedData(null, emptyDoc);
 
     const saveCallback = useCallback((newData) => {
         setCustomerId(newData._id);
