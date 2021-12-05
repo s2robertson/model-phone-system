@@ -7,6 +7,7 @@ services:
             - ./server-api:/app
             - /app/node_modules
             # - ./session_password.txt:/app/session_password.txt
+            # - ./ssl:/app/ssl
         ports:
             - 5000:5000
         environment:
@@ -15,19 +16,21 @@ services:
             - REDIS_CONN=redis://redis:6379
             - SESSION_PWD=supercalifragilisticexpialodocious
             # - SESSION_PWD_FILE=./session_password.txt
+            # - HTTPS=true
 
     client:
         build: ./react-client
         volumes:
             - ./react-client:/app
             - /app/node_modules
+            - ./ssl:/app/ssl
         ports:
             - 3000:3000
         environment:
-            - HTTPS=true
-            - SSL_KEY_FILE=./ssl/key.pem
-            - SSL_CRT_FILE=./ssl/certificate.pem
-            - PROXY_SERVER=https://server:5000
+            # - HTTPS=true
+            # - SSL_KEY_FILE=./ssl/key.pem
+            # - SSL_CRT_FILE=./ssl/certificate.pem
+            - PROXY_SERVER=http://server:5000   # change to 'https://server:5000' if HTTPS=true
         stdin_open: true
     
     # phone_0001:

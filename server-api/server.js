@@ -1,4 +1,3 @@
-const https = require('https');
 const express = require('express');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
@@ -6,6 +5,7 @@ const router = require('./routes');
 const fs = require('fs');
 
 //console.log(process.env.NODE_ENV);
+const useHttps = !!process.env.HTTPS;
 
 mongoose.Promise = global.Promise;
 const mongooseConnectOpts = { 
@@ -45,7 +45,7 @@ app.use(session({
     cookie : {
         httpOnly : true,
         sameSite : 'strict',
-        secure : true,
+        secure : useHttps,
         maxAge : 600000 // 10 minutes
     },
     store: new RedisStore({ client: redisClient }),
@@ -70,17 +70,25 @@ app.use((err, req, res, next) => {
     res.json({ error : err.message });
 });
 
-const options = {
-    key : fs.readFileSync('./ssl/key.pem'),
-    cert : fs.readFileSync('./ssl/certificate.pem')
-};
-const server = https.createServer(options, app);
+let server;
+if (useHttps) {
+    const https = require('https');
+    const options = {
+        key : fs.readFileSync('./ssl/key.pem'),
+        cert : fs.readFileSync('./ssl/certificate.pem')
+    };
+    server = https.createServer(options, app);
+}
+else {
+    const http = require('http');
+    server = http.createServer(app);
+}
 const phoneManager = require('./phone/phoneManager');
 phoneManager.init(server);
 
 if (process.env.PROCESS_BILLS) {
-    /* This section is largely a prototype.  It might want to be turned into a separate process 
-     * and run through regular cron.  Alternately, it could run in worker threads.  N.B. the cron 
+    /* This section is largely a prototype.  It probably wants to be turned into a separate process 
+     * and run via an external cron.  Alternately, it could run in worker threads.  N.B. the cron 
      * time is in GMT, NOT local time */
     const cron = require('node-cron');
     const { processBills } = require('./billing/processBills');
