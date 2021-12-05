@@ -6,6 +6,7 @@ services:
         volumes:
             - ./server-api:/app
             - /app/node_modules
+            # - ./session_password.txt:/app/session_password.txt
         ports:
             - 5000:5000
         environment:
@@ -13,6 +14,7 @@ services:
             - DB_CONN=mongodb://mongodb:27017/model-phone-system
             - REDIS_CONN=redis://redis:6379
             - SESSION_PWD=supercalifragilisticexpialodocious
+            # - SESSION_PWD_FILE=./session_password.txt
 
     client:
         build: ./react-client

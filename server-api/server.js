@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const morgan = require('morgan');
 const router = require('./routes');
+const fs = require('fs');
 
 //console.log(process.env.NODE_ENV);
 
@@ -23,6 +24,17 @@ const session = require('express-session');
 const RedisStore = require('connect-redis')(session);
 const redisClient = new Redis(process.env.REDIS_CONN)
 
+let sessionPwd = process.env.SESSION_PWD;
+if (!sessionPwd) {
+    const sessionPwdFile = process.env.SESSION_PWD_FILE;
+    if (sessionPwdFile) {
+        sessionPwd = fs.readFileSync(sessionPwdFile, { encoding : 'utf8' });
+    }
+    else {
+        sessionPwd = 'encryptme';
+        // alternatively, process.exit(-1)
+    }
+}
 const app = express();
 const port = process.env.PORT || 5000;
 app.use(morgan('dev'));
@@ -37,7 +49,7 @@ app.use(session({
         maxAge : 600000 // 10 minutes
     },
     store: new RedisStore({ client: redisClient }),
-    secret : process.env.SESSION_PWD || 'encryptme',
+    secret : sessionPwd,
     saveUninitialized : false,
     resave : false
 }));
@@ -58,7 +70,6 @@ app.use((err, req, res, next) => {
     res.json({ error : err.message });
 });
 
-const fs = require('fs');
 const options = {
     key : fs.readFileSync('./ssl/key.pem'),
     cert : fs.readFileSync('./ssl/certificate.pem')
