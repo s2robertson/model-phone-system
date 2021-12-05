@@ -25,6 +25,7 @@ services:
             - HTTPS=true
             - SSL_KEY_FILE=./ssl/key.pem
             - SSL_CRT_FILE=./ssl/certificate.pem
+            - PROXY_SERVER=https://server:5000
         stdin_open: true
     
     # phone_0001:
