@@ -83,6 +83,8 @@ else {
     const http = require('http');
     server = http.createServer(app);
 }
+
+// Potential improvement: split the phone manager into a separate service from the REST API
 const phoneManager = require('./phone/phoneManager');
 phoneManager.init(server);
 

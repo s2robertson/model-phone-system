@@ -23,7 +23,7 @@ services:
         volumes:
             - ./react-client:/app
             - /app/node_modules
-            - ./ssl:/app/ssl
+            # - ./ssl:/app/ssl
         ports:
             - 3000:3000
         environment:
@@ -35,7 +35,7 @@ services:
     
     # phone_0001:
         # build: ./phone-emulator
-        # command: <phone account ID> https://server:5000
+        # command: 0001 http://server:5000
         # volumes:
             # - ./phone-emulator:/phone-emulator
             # - /phone-emulator/__pycache__
