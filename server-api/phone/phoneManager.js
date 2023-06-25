@@ -476,7 +476,7 @@ class Phone {
 
     onTalkPartner(msg) {
         if (this.phoneState === PhoneStates.CALL_ACTIVE) {
-            this.socket.emit(TALK, msg);
+            this.remotePhone.signalIncomingTalk(msg);
         }
     }
 }

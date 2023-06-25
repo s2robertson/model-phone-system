@@ -11,6 +11,7 @@ const CALL_CANCELLED = 'call_cancelled';
 const CALLEE_RINGING = 'callee_ringing';
 const CALL_CONNECTED = 'call_connected';
 const CALL_ENDED = 'call_ended';
+const TALK = 'talk';
 
 const ERROR = 'error';
 
@@ -43,6 +44,10 @@ class RemotePhone extends AwaitEventEmitter {
 
     signalCallEnded() {
         this._socket.emit(CALL_ENDED);
+    }
+
+    signalIncomingTalk(msg) {
+        this._socket.emit(TALK, msg);
     }
 
     signalError(reason) {
