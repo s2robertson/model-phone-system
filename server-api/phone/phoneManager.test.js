@@ -1142,7 +1142,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('call_acknowledged', '2222');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['callee_ringing']));
 
         await mockSocket1111._emit('call_accepted');
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
@@ -1165,7 +1165,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('call_acknowledged', '2222');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['callee_ringing']));
 
         await mockSocket1111._emit('call_accepted');
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
@@ -1197,7 +1197,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('call_acknowledged', '2222');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['callee_ringing']));
 
         await mockSocket1111._emit('call_accepted');
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
@@ -1283,7 +1283,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('call_acknowledged', '2222');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['callee_ringing']));
 
         await mockSocket1111._emit('disconnect');
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
@@ -1297,7 +1297,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('call_acknowledged', '2222');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'callee_ringing']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['callee_ringing']));
 
         await subClient._emit('message', 'phone:1111', JSON.stringify(['call_cancelled', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(2);

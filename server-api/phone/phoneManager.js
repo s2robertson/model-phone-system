@@ -48,6 +48,7 @@ Object.freeze(CALL_NOT_POSSIBLE_REASONS);
 const BASIC_EMIT = 'basic_emit';
 const CALL_REQUEST = 'call_request';
 const CALL_REFUSED = 'call_refused';
+const CALLEE_RINGING = 'callee_ringing';
 const CALL_CANCELLED = 'call_cancelled';
 const CALL_CONNECTED = 'call_connected';
 const CALL_ENDED = 'call_ended';
@@ -249,7 +250,7 @@ class Phone {
         this.socket.emit(CALL_REQUEST, phoneNumber);
     }
 
-    async onCallAcknowledged(phoneNumber) {
+    async onCallAcknowledgedSelf(phoneNumber) {
         const otherPhone = await getPhone(phoneNumber, false);
 
         if (this.phoneState === PhoneStates.INVALID) {
@@ -269,7 +270,11 @@ class Phone {
 
         this.phoneState = PhoneStates.CALL_INIT_INCOMING;
         this.callPartner = otherPhone;
-        this.callPartner.emit('callee_ringing');
+        this.callPartner.onCallAcknowledgedPartner();
+    }
+
+    onCallAcknowledgedPartner() {
+        this.socket.emit(CALLEE_RINGING);
     }
 
     async onCallAccepted() {
@@ -487,6 +492,10 @@ class RemotePhone {
         redisClient.publish(this.key, JSON.stringify([CALL_REQUEST, phoneNumber]));
     }
 
+    onCallAcknowledgedPartner() {
+        redisClient.publish(this.key, JSON.stringify([CALLEE_RINGING]));
+    }
+
     onCallRefusedPartner(phoneNumber, reason) {
         redisClient.publish(this.key, JSON.stringify([CALL_REFUSED, phoneNumber, reason]));
     }
@@ -514,6 +523,10 @@ remoteEvents.on(BASIC_EMIT, (phone, ...args) => {
 
 remoteEvents.on(CALL_REQUEST, (phone, phoneNumber) => {
     phone.onIncomingCall(phoneNumber);
+});
+
+remoteEvents.on(CALLEE_RINGING, (phone) => {
+    phone.onCallAcknowledgedPartner();
 })
 
 remoteEvents.on(CALL_REFUSED, (phone, phoneNumber, reason) => {
@@ -591,7 +604,7 @@ module.exports.init = function(server) {
         
         socket.on('disconnect', () => phone.onDisconnect());
         socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
-        socket.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledged(phoneNumber));
+        socket.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledgedSelf(phoneNumber));
         socket.on('call_accepted', () => phone.onCallAccepted());
         socket.on('hang_up', () => phone.onHangUp());
         socket.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
@@ -610,7 +623,7 @@ module.exports.addPhone = function(remotePhone) {
     const phone = new Phone(remotePhone, socket);
     remotePhone.on('disconnect', () => phone.onDisconnect());
     remotePhone.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
-    remotePhone.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledged(phoneNumber));
+    remotePhone.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledgedSelf(phoneNumber));
     remotePhone.on('call_accepted', () => phone.onCallAccepted());
     remotePhone.on('hang_up', () => phone.onHangUp());
     remotePhone.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
