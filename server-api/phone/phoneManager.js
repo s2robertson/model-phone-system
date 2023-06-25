@@ -243,7 +243,7 @@ class Phone {
     }
 
     onIncomingCall(phoneNumber) {
-        this.socket.emit(CALL_REQUEST, phoneNumber);
+        this.remotePhone.signalCallRequest(phoneNumber);
     }
 
     async onCallAcknowledgedSelf(phoneNumber) {

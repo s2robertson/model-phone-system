@@ -5,6 +5,7 @@ const io = require('socket.io');
 const PhoneAccount = require('../models/phoneAccount');
 const phoneManager = require('./phoneManager');
 
+const CALL_REQUEST = 'call_request';
 const CALL_NOT_POSSIBLE = 'call_not_possible';
 const CALL_CANCELLED = 'call_cancelled';
 
@@ -13,6 +14,10 @@ class RemotePhone extends AwaitEventEmitter {
     constructor(socket) {
         super();
         this._socket = socket;
+    }
+
+    signalCallRequest(phoneNumber) {
+        this._socket.emit(CALL_REQUEST, phoneNumber);
     }
 
     signalCallNotPossible(reason) {
