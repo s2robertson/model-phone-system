@@ -7,10 +7,9 @@
     "dev": "concurrently --kill-others-on-fail \"npm run server\" \"npm run client\"",
     "test": "jest"
   },
-  "dependencies": {},
   "devDependencies": {
     "concurrently": "^5.1.0",
-    "jest": "^26.4.2"
+    "jest": "^29.5.0"
   },
   "jest": {
     "roots": [

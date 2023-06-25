@@ -32,14 +32,27 @@ class MockSocket {
             }
         }
         this.eventEmitter = new AwaitEventEmitter();
+        this.onAnyHandlers = [];
     }
 
     on(eventName, handler) {
         this.eventEmitter.on(eventName, handler);
     }
 
+    onAny(handler) {
+        this.onAnyHandlers.push(handler);
+    }
+
     async _emit(...args) {
         await this.eventEmitter.emit(...args);
+        if (args[0] != 'disconnect' && args[0] != 'disconnecting') {
+            for (const handler of this.onAnyHandlers) {
+                const res = handler(...args);
+                if (res instanceof Promise) {
+                    await res;
+                }
+            }
+        }
     }
 
     emit() {

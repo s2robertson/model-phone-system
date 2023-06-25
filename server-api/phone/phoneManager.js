@@ -35,6 +35,13 @@ const PhoneStates = {
 }
 Object.freeze(PhoneStates);
 
+const CALL_NOT_POSSIBLE_REASONS = {
+    INACTIVE: 'not_active',
+    ALREADY_IN_CALL: 'already_in_call',
+    DIALED_SELF: 'dialed_self'
+}
+Object.freeze(CALL_NOT_POSSIBLE_REASONS);
+
 const BASIC_EMIT = 'basic_emit';
 const CALL_REQUEST = 'call_request';
 const CALL_REFUSED = 'call_refused';
@@ -581,6 +588,23 @@ module.exports.init = function(server) {
         localRegistry.set(phone.key, phone);
         phone.initRemote();
     });
+}
+
+module.exports.addPhone = function(remotePhone) {
+    // for migration
+    const socket = remotePhone._socket;
+
+    const phone = new Phone(socket);
+    remotePhone.on('disconnect', () => phone.onDisconnect());
+    remotePhone.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
+    remotePhone.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledged(phoneNumber));
+    remotePhone.on('call_accepted', () => phone.onCallAccepted());
+    remotePhone.on('hang_up', () => phone.onHangUp());
+    remotePhone.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
+    remotePhone.on('talk', (msg) => phone.onTalk(msg));
+
+    localRegistry.set(phone.key, phone);
+    phone.initRemote();
 }
 
 module.exports.updatePhoneNumber = function(oldVal, newVal) {

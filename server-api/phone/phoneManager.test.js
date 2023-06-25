@@ -1,14 +1,14 @@
 let PhoneManager;
 
 const flushPromises = () => new Promise(setImmediate);
-jest.useFakeTimers();
+// jest.useFakeTimers();
 
 jest.mock('socket.io');
-const io = require('socket.io');
-const MockSocket = io.Socket;
+let io = require('socket.io');
+let MockSocket = io.Socket;
 
 jest.mock('ioredis');
-const Redis = require('ioredis');
+let Redis = require('ioredis');
 
 beforeEach(() => {
     io.mockClear();
@@ -41,13 +41,13 @@ test('Test server mock creation', () => {
 });
 
 jest.mock('../models/phoneAccount');
-const PhoneAccount = require('../models/phoneAccount');
+let PhoneAccount = require('../models/phoneAccount');
 jest.mock('../models/billingPlan');
-const BillingPlan = require('../models/billingPlan');
+let BillingPlan = require('../models/billingPlan');
 jest.mock('../models/call');
-const Call = require('../models/call');
+let Call = require('../models/call');
 jest.mock('../billing/processCall');
-const processCall = require('../billing/processCall');
+let processCall = require('../billing/processCall');
 
 class MockObjectId {
     constructor(id) {
@@ -64,6 +64,8 @@ class MockObjectId {
         return false;
     }
 }
+
+let SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
 
 describe('registration tests', () => {
     let server;
@@ -85,9 +87,11 @@ describe('registration tests', () => {
 
     beforeEach(() => {
         jest.isolateModules(() => {
-            PhoneManager = require('./phoneManager');
+            // PhoneManager = require('./phoneManager');
+            SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
         });
-        PhoneManager.init(null);
+        SocketIoPhoneAdapter(null);
+        //PhoneManager.init(null);
         server = io.Server.mock.instances[0];
         mockSocket = new MockSocket('1234');
         mockEmit = jest.spyOn(mockSocket, 'emit');
@@ -149,8 +153,10 @@ describe('basic make_call failure tests', () => {
     beforeEach(() => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
+            SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
         });
-        PhoneManager.init(null);
+        SocketIoPhoneAdapter(null);
+        // PhoneManager.init(null);
         server = io.Server.mock.instances[0];
         mockSocket = new MockSocket('1111');
         mockEmit = jest.spyOn(mockSocket, 'emit');
@@ -278,8 +284,10 @@ describe('make_call tests with two parties', () => {
     beforeEach(async () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
+            SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
         });
-        PhoneManager.init(null);
+        SocketIoPhoneAdapter(null);
+        // PhoneManager.init(null);
         server = io.Server.mock.instances[0];
         paFindOneExec
             .mockResolvedValueOnce(phoneAccount1111)
@@ -646,8 +654,10 @@ describe('make_call tests with multiple parties', () => {
     beforeEach(async () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
+            SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
         });
-        PhoneManager.init(null);
+        SocketIoPhoneAdapter(null);
+        // PhoneManager.init(null);
         server = io.Server.mock.instances[0];
         paFindOneExec
             .mockResolvedValueOnce(phoneAccount1111)
@@ -973,6 +983,7 @@ describe('tests involving remote phones', () => {
     let subClient;
 
     beforeAll(() => {
+        jest.useFakeTimers();
         paFindOneExec = jest.fn().mockResolvedValue(phoneAccount1111);
         PhoneAccount.findOne.mockReturnValue({
             exec : paFindOneExec
@@ -989,7 +1000,6 @@ describe('tests involving remote phones', () => {
         Call.findById.mockReturnValue({
             exec : callFindByIdExec
         });
-
         Redis.prototype.hgetall.mockResolvedValue({
             accountId : 'bbb',
             isValid : "true",
@@ -997,13 +1007,18 @@ describe('tests involving remote phones', () => {
             callBpId : null
         });
     });
+
+    afterAll(() => {
+        jest.useRealTimers();
+    })
     
     beforeEach(async () => {
         jest.isolateModules(() => {
             PhoneManager = require('./phoneManager');
+            SocketIoPhoneAdapter = require('./socketIoPhoneAdapter');
         });
         
-        PhoneManager.init(null);
+        SocketIoPhoneAdapter(null);
         server = io.Server.mock.instances[0];
         redisClient = Redis.mock.instances[0];
         subClient = Redis.mock.instances[1];
@@ -1104,7 +1119,9 @@ describe('tests involving remote phones', () => {
 
         // close call remotely
         await subClient._emit('message', 'phone:1111', JSON.stringify(['call_ended', '2222', true]));
+        jest.useRealTimers();
         await flushPromises();
+        jest.useFakeTimers();
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_ended');
         expect(callDoc.save).toHaveBeenCalledTimes(2);
@@ -1165,7 +1182,9 @@ describe('tests involving remote phones', () => {
 
         await subClient._emit('message', 'phone:1111', JSON.stringify(['close_call_ack', '2222']));
         jest.runAllTimers();
+        jest.useRealTimers();
         await flushPromises();
+        jest.useFakeTimers();
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(redisClient.publish).toHaveBeenCalledTimes(3);
         expect(processCall).not.toHaveBeenCalled();
@@ -1202,7 +1221,9 @@ describe('tests involving remote phones', () => {
         });
         bpFindByIdExec.mockResolvedValueOnce(bpDocB);
         jest.runAllTimers();
+        jest.useRealTimers();
         await flushPromises();
+        jest.useFakeTimers();
         expect(Call.findById).toBeCalledTimes(1);
         expect(Call.findById).toHaveBeenLastCalledWith(mockCallDoc._id);
         expect(BillingPlan.findById).toHaveBeenCalledTimes(1);
