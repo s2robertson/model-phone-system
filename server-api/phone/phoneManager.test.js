@@ -1075,7 +1075,7 @@ describe('tests involving remote phones', () => {
 
         await mockSocket1111._emit('talk', 'Hello, remote phone');
         expect(redisClient.publish).toHaveBeenCalledTimes(3);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'talk', 'Hello, remote phone']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['talk', 'Hello, remote phone']));
 
         await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'talk', 'Response from remote phone']));
         expect(mockEmit1111).toHaveBeenCalledTimes(3);

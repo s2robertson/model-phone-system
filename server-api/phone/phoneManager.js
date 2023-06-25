@@ -53,6 +53,7 @@ const CALL_CANCELLED = 'call_cancelled';
 const CALL_CONNECTED = 'call_connected';
 const CALL_ENDED = 'call_ended';
 const CLOSE_CALL_ACK = 'close_call_ack';
+const TALK = 'talk';
 
 const UPDATE_PHONE_NUMBER = 'update_phone_number';
 const SUSPEND_PHONE = 'suspend_phone';
@@ -470,11 +471,17 @@ class Phone {
         this.callDoc = null;
     }
 
-    onTalk(msg) {
+    onTalkSelf(msg) {
         // console.log(`talk event from ${socket.phoneNumber} to ${socket.callPartner.phoneNumber}.  msg = ${msg}`)
         if (this.phoneState === PhoneStates.CALL_ACTIVE && this.callPartner) {
-            this.callPartner.emit('talk', msg);
+            this.callPartner.onTalkPartner(msg);
             // console.log('talk event sent')
+        }
+    }
+
+    onTalkPartner(msg) {
+        if (this.phoneState === PhoneStates.CALL_ACTIVE) {
+            this.socket.emit(TALK, msg);
         }
     }
 }
@@ -523,6 +530,10 @@ class RemotePhone {
     onCloseCallAcknowledgement(phoneNumber) {
         redisClient.publish(this.key, JSON.stringify([CLOSE_CALL_ACK, phoneNumber]));
     }
+
+    onTalkPartner(msg) {
+        redisClient.publish(this.key, JSON.stringify([TALK, msg]));
+    }
 }
 
 remoteEvents.on(BASIC_EMIT, (phone, ...args) => {
@@ -556,6 +567,10 @@ remoteEvents.on(CALL_ENDED, (phone, phoneNumber, ack) => {
 remoteEvents.on(CLOSE_CALL_ACK, (phone, phoneNumber) => {
     phone.onCloseCallAcknowledgement(phoneNumber);
 });
+
+remoteEvents.on(TALK, (phone, msg) => {
+    phone.onTalkPartner(msg);
+})
 
 remoteEvents.on(UPDATE_PHONE_NUMBER, async (phone, newPhoneNumber) => {
     const newKey = getKey(newPhoneNumber);
@@ -616,7 +631,7 @@ module.exports.init = function(server) {
         socket.on('call_accepted', () => phone.onCallAccepted());
         socket.on('hang_up', () => phone.onHangUp());
         socket.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
-        socket.on('talk', (msg) => phone.onTalk(msg));
+        socket.on('talk', (msg) => phone.onTalkSelf(msg));
 
         socket.emit('registered', phone.phoneNumber);
         localRegistry.set(phone.key, phone);
@@ -635,7 +650,7 @@ module.exports.addPhone = function(remotePhone) {
     remotePhone.on('call_accepted', () => phone.onCallAccepted());
     remotePhone.on('hang_up', () => phone.onHangUp());
     remotePhone.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
-    remotePhone.on('talk', (msg) => phone.onTalk(msg));
+    remotePhone.on('talk', (msg) => phone.onTalkSelf(msg));
 
     localRegistry.set(phone.key, phone);
     phone.initRemote();
