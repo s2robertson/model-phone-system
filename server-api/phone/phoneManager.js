@@ -281,7 +281,7 @@ class Phone {
             return this.onCallAcceptedOutgoing();
         }
         else {
-            this.socket.emit('error', 'invalid_call_accepted');
+            this.remotePhone.signalError('invalid_call_accepted');
         }
     }
 

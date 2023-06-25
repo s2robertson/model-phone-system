@@ -10,6 +10,8 @@ const CALL_NOT_POSSIBLE = 'call_not_possible';
 const CALL_CANCELLED = 'call_cancelled';
 const CALLEE_RINGING = 'callee_ringing';
 
+const ERROR = 'error';
+
 // AwaitEventEmitter is only for migration, and needs to change to EventEmitter
 class RemotePhone extends AwaitEventEmitter {
     constructor(socket) {
@@ -31,6 +33,10 @@ class RemotePhone extends AwaitEventEmitter {
 
     signalCalleeRinging() {
         this._socket.emit(CALLEE_RINGING);
+    }
+
+    signalError(reason) {
+        this._socket.emit(ERROR, reason);
     }
 }
 
