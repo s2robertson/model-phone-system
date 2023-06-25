@@ -9,6 +9,7 @@ const CALL_REQUEST = 'call_request';
 const CALL_NOT_POSSIBLE = 'call_not_possible';
 const CALL_CANCELLED = 'call_cancelled';
 const CALLEE_RINGING = 'callee_ringing';
+const CALL_CONNECTED = 'call_connected';
 
 const ERROR = 'error';
 
@@ -23,6 +24,10 @@ class RemotePhone extends AwaitEventEmitter {
         this._socket.emit(CALL_REQUEST, phoneNumber);
     }
 
+    signalCalleeRinging() {
+        this._socket.emit(CALLEE_RINGING);
+    }
+
     signalCallNotPossible(reason) {
         this._socket.emit(CALL_NOT_POSSIBLE, reason);
     }
@@ -31,8 +36,8 @@ class RemotePhone extends AwaitEventEmitter {
         this._socket.emit(CALL_CANCELLED);
     }
 
-    signalCalleeRinging() {
-        this._socket.emit(CALLEE_RINGING);
+    signalCallConnected() {
+        this._socket.emit(CALL_CONNECTED);
     }
 
     signalError(reason) {

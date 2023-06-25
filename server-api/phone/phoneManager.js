@@ -359,7 +359,7 @@ class Phone {
     onPartnerConnected(phoneNumber) {
         if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
             this.callPartnerConfirmed = true;
-            this.socket.emit(CALL_CONNECTED);
+            this.remotePhone.signalCallConnected();
         }
     }
 
