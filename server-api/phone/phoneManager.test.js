@@ -1062,7 +1062,7 @@ describe('tests involving remote phones', () => {
         const callDoc = Call.mock.instances[0];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_connected']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
         
         // verify that redis data was updated when the Call was created
         expect(redisClient.multi).toHaveBeenCalledTimes(1);
@@ -1115,7 +1115,7 @@ describe('tests involving remote phones', () => {
         const callDoc = Call.mock.instances[0];
         expect(callDoc.save).toHaveBeenCalledTimes(1);
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
-        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['basic_emit', 'call_connected']));
+        expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
 
         // close call remotely
         await subClient._emit('message', 'phone:1111', JSON.stringify(['call_ended', '2222', true]));

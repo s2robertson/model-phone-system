@@ -279,50 +279,58 @@ class Phone {
 
     async onCallAccepted() {
         if (this.phoneState === PhoneStates.CALL_INIT_INCOMING) {
-            this.phoneState = PhoneStates.CALL_ACTIVE;
-            this.callPartner.onPartnerConnected(this.phoneNumber);
+            this.onCallAcceptedIncoming();
         }
         else if (this.phoneState === PhoneStates.CALL_INIT_OUTGOING && this.callPartnerConfirmed) {
-            try {
-                // Persist to DB
-                this.phoneState = PhoneStates.CALL_INIT_CREATING_DOC;
-                const callDoc = new Call({
-                    callerBill : this.billId,
-                    calleeNumber : this.callPartner.phoneNumber
-                });
-                //console.log('Saving from onCallAccepted');
-                await callDoc.save();
-
-                if (this.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
-                    // someone either disconnected, or was suspended
-                    if (this.callPartner) {
-                        // callPartner can be empty if the callee hung up immediately
-                        this.callPartner.onCallCancelled(this.phoneNumber);
-                    }
-                    this.resetCallProperties();
-                    await callDoc.remove();
-                    return;
-                }
-                
-                this.phoneState = PhoneStates.CALL_ACTIVE;
-                this.callDoc = callDoc;
-                this.callPartner.emit(CALL_CONNECTED);
-                
-                await redisClient.multi()
-                    .hset(this.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
-                    .hset(this.callPartner.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
-                    .exec();
-            }
-            catch (err) {
-                if (this.phoneState === PhoneStates.CALL_ACTIVE) {
-                    //console.log('Calling closeCall from onCallAccepted (error case)');
-                    await this.closeCall();
-                }
-                this.resetCallProperties();
-            }
+            return this.onCallAcceptedOutgoing();
         }
         else {
             this.socket.emit('error', 'invalid_call_accepted');
+        }
+    }
+
+    onCallAcceptedIncoming() {
+        this.phoneState = PhoneStates.CALL_ACTIVE;
+        this.callPartner.onPartnerConnected(this.phoneNumber);
+    }
+
+    async onCallAcceptedOutgoing() {
+        try {
+            // Persist to DB
+            this.phoneState = PhoneStates.CALL_INIT_CREATING_DOC;
+            const callDoc = new Call({
+                callerBill : this.billId,
+                calleeNumber : this.callPartner.phoneNumber
+            });
+            //console.log('Saving from onCallAccepted');
+            await callDoc.save();
+
+            if (this.phoneState !== PhoneStates.CALL_INIT_CREATING_DOC) {
+                // someone either disconnected, or was suspended
+                if (this.callPartner) {
+                    // callPartner can be empty if the callee hung up immediately
+                    this.callPartner.onCallCancelled(this.phoneNumber);
+                }
+                this.resetCallProperties();
+                await callDoc.remove();
+                return;
+            }
+            
+            this.phoneState = PhoneStates.CALL_ACTIVE;
+            this.callDoc = callDoc;
+            this.callPartner.onPartnerConnected(this.phoneNumber);
+            
+            await redisClient.multi()
+                .hset(this.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
+                .hset(this.callPartner.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
+                .exec();
+        }
+        catch (err) {
+            if (this.phoneState === PhoneStates.CALL_ACTIVE) {
+                //console.log('Calling closeCall from onCallAccepted (error case)');
+                await this.closeCall();
+            }
+            this.resetCallProperties();
         }
     }
 
