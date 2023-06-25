@@ -45,7 +45,6 @@ const CALL_NOT_POSSIBLE_REASONS = {
 }
 Object.freeze(CALL_NOT_POSSIBLE_REASONS);
 
-const BASIC_EMIT = 'basic_emit';
 const CALL_REQUEST = 'call_request';
 const CALL_REFUSED = 'call_refused';
 const CALLEE_RINGING = 'callee_ringing';
@@ -108,10 +107,6 @@ class Phone {
             this.phoneState === PhoneStates.CALL_INIT_OUTGOING ||
             this.phoneState === PhoneStates.CALL_INIT_CREATING_DOC ||
             this.phoneState ===  PhoneStates.CALL_ACTIVE;
-    }
-
-    emit(...args) {
-        this.socket.emit(...args);
     }
 
     async initRemote() {
@@ -499,10 +494,6 @@ class RemotePhone {
         this.isOnCall = !!remotePhoneData[CALL_ID];
     }
 
-    emit(...args) {
-        redisClient.publish(this.key, JSON.stringify([BASIC_EMIT, ...args]));
-    }
-
     onIncomingCall(phoneNumber) {
         redisClient.publish(this.key, JSON.stringify([CALL_REQUEST, phoneNumber]));
     }
@@ -535,10 +526,6 @@ class RemotePhone {
         redisClient.publish(this.key, JSON.stringify([TALK, msg]));
     }
 }
-
-remoteEvents.on(BASIC_EMIT, (phone, ...args) => {
-    phone.emit(...args);
-});
 
 remoteEvents.on(CALL_REQUEST, (phone, phoneNumber) => {
     phone.onIncomingCall(phoneNumber);

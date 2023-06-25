@@ -1048,7 +1048,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_request', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['callee_ringing']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
@@ -1077,7 +1077,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(3);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['talk', 'Hello, remote phone']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'talk', 'Response from remote phone']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['talk', 'Response from remote phone']));
         expect(mockEmit1111).toHaveBeenCalledTimes(3);
         expect(mockEmit1111).toHaveBeenLastCalledWith('talk', 'Response from remote phone');
 
@@ -1101,7 +1101,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_request', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['callee_ringing']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
@@ -1136,7 +1136,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by remote phone, remote phone hangs up', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
@@ -1148,7 +1148,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_connected', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
 
@@ -1159,7 +1159,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by a remote phone, local phone hangs up, receives ack', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
@@ -1171,7 +1171,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_connected', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
 
@@ -1191,7 +1191,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by a remote phone, local phone hangs up, does not receive ack', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
@@ -1203,7 +1203,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(2);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_connected', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_connected']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_connected', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(2);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_connected');
 
@@ -1255,7 +1255,7 @@ describe('tests involving remote phones', () => {
         expect(redisClient.publish).toHaveBeenCalledTimes(1);
         expect(redisClient.publish).toHaveBeenLastCalledWith('phone:2222', JSON.stringify(['call_request', '1111']));
 
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'callee_ringing']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['callee_ringing']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('callee_ringing');
         
@@ -1266,7 +1266,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by a remote phone, local phone refuses', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
@@ -1277,7 +1277,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by a remote phone, local phone acknowledges, but then cancels', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
@@ -1291,7 +1291,7 @@ describe('tests involving remote phones', () => {
     });
 
     test('called by a remote phone, remote phone cancels', async () => {
-        await subClient._emit('message', 'phone:1111', JSON.stringify(['basic_emit', 'call_request', '2222']));
+        await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockEmit1111).toHaveBeenCalledTimes(1);
         expect(mockEmit1111).toHaveBeenLastCalledWith('call_request', '2222');
 
