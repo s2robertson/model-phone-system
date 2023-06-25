@@ -8,6 +8,7 @@ const phoneManager = require('./phoneManager');
 const CALL_REQUEST = 'call_request';
 const CALL_NOT_POSSIBLE = 'call_not_possible';
 const CALL_CANCELLED = 'call_cancelled';
+const CALLEE_RINGING = 'callee_ringing';
 
 // AwaitEventEmitter is only for migration, and needs to change to EventEmitter
 class RemotePhone extends AwaitEventEmitter {
@@ -26,6 +27,10 @@ class RemotePhone extends AwaitEventEmitter {
 
     signalCallCancelled() {
         this._socket.emit(CALL_CANCELLED);
+    }
+
+    signalCalleeRinging() {
+        this._socket.emit(CALLEE_RINGING);
     }
 }
 

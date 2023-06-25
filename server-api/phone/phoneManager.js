@@ -270,7 +270,7 @@ class Phone {
     }
 
     onCallAcknowledgedPartner() {
-        this.socket.emit(CALLEE_RINGING);
+        this.remotePhone.signalCalleeRinging();
     }
 
     async onCallAccepted() {
