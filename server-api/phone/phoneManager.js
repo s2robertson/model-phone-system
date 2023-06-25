@@ -437,7 +437,7 @@ class Phone {
 
     async onCallEndedRemotely(phoneNumber, ack = false) {
         if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
-            this.socket.emit(CALL_ENDED);
+            this.remotePhone.signalCallEnded();
             if (ack) {
                 // the remote server wants this one to process the call
                 await this.closeCall(false);
