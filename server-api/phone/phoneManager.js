@@ -38,16 +38,16 @@ Object.freeze(PhoneStates);
 const CALL_NOT_POSSIBLE_REASONS = {
     INACTIVE: 'not_active',
     ALREADY_IN_CALL: 'already_in_call',
-    DIALED_SELF: 'dialed_self'
+    DIALED_SELF: 'dialed_self',
+    NO_RECIPIENT: 'no_recipient',
+    BUSY: 'busy',
+    ERROR: 'error'
 }
 Object.freeze(CALL_NOT_POSSIBLE_REASONS);
 
 const BASIC_EMIT = 'basic_emit';
 const CALL_REQUEST = 'call_request';
 const CALL_REFUSED = 'call_refused';
-const CALL_NOT_POSSIBLE = 'call_not_possible';
-const BUSY = 'busy';
-const NO_RECIPIENT = 'no_recipient';
 const CALL_CANCELLED = 'call_cancelled';
 const CALL_CONNECTED = 'call_connected';
 const CALL_ENDED = 'call_ended';
@@ -82,7 +82,8 @@ async function getPhone(phoneNumber, queryRemote = true) {
 }
 
 class Phone {
-    constructor(socket) {
+    constructor(remotePhone, socket) {
+        this.remotePhone = remotePhone;
         this.socket = socket;
         this.phoneState = socket.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
         this.phoneNumber = socket.phoneNumber;
@@ -161,17 +162,17 @@ class Phone {
         //console.log(`In make_call (${this.phoneNumber})`);
         try {
             if (this.phoneState === PhoneStates.INVALID) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'not_active');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.INACTIVE);
                 //console.log('make_call failed (caller suspended)');
                 return;
             }
             else if (this.phoneState !== PhoneStates.NOT_IN_CALL) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'already_in_call');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ALREADY_IN_CALL);
                 //console.log('make_call failed (caller already in call)');
                 return;
             }
             else if (phoneNumber === this.phoneNumber) {
-                this.socket.emit(CALL_NOT_POSSIBLE, 'dialed_self');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.DIALED_SELF);
                 //console.log('make_call failed (dialed self)');
                 return;
             }
@@ -179,13 +180,13 @@ class Phone {
             const otherPhone = await getPhone(phoneNumber);
             
             if (!otherPhone || !otherPhone.isValid) {
-                this.socket.emit(CALL_NOT_POSSIBLE, NO_RECIPIENT);
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.NO_RECIPIENT);
                 //console.log('make_call failed no() recipient found)');
                 return;
             }
             else if (otherPhone.isOnCall) {
                 // convenience check before querying the database for phone account status
-                this.socket.emit(CALL_NOT_POSSIBLE, BUSY);
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.BUSY);
                 //console.log('make_call failed (recipient busy)');
                 return;
             }
@@ -197,7 +198,7 @@ class Phone {
             // validate the query results
             if (!phoneAccounts || phoneAccounts.length !== 2) {
                 //console.log(`phoneAccounts.length = ${phoneAccounts ? phoneAccounts.length : 0}`);
-                this.socket.emit(CALL_NOT_POSSIBLE, 'error');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ERROR);
                 return;
             }
             let callerIndex = -1, calleeIndex = -1;
@@ -211,7 +212,7 @@ class Phone {
             }
             if (callerIndex === -1 || calleeIndex === -1) {
                 //console.log(`Could not identify phone accounts: callerIndex = ${callerIndex}, calleeIndex = ${calleeIndex}`);
-                socket.emit(CALL_NOT_POSSIBLE, 'error');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ERROR);
                 return;
             }
 
@@ -222,11 +223,11 @@ class Phone {
             }
             if (!phoneAccounts[callerIndex].isActive || phoneAccounts[callerIndex].isSuspended) {
                 //console.log('make_call failed because caller is retired or suspended');
-                this.socket.emit(CALL_NOT_POSSIBLE, 'error');
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ERROR);
                 return;
             } else if (!phoneAccounts[calleeIndex].isActive || phoneAccounts[calleeIndex].isSuspended) {
                 //console.log('make_call failed because callee is retired or suspended');
-                this.socket.emit(CALL_NOT_POSSIBLE, NO_RECIPIENT);
+                this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.NO_RECIPIENT);
                 return;
             }
             
@@ -239,7 +240,7 @@ class Phone {
         }
         catch (err) {
             console.log(`make_call failed due to an error: ${err}`);
-            this.socket.emit(CALL_NOT_POSSIBLE, 'error');
+            this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ERROR);
             this.resetCallProperties();
         }
     }
@@ -250,14 +251,14 @@ class Phone {
         if (this.phoneState === PhoneStates.INVALID) {
             // the phone got suspended
             this.socket.emit(CALL_CANCELLED);
-            otherPhone.onCallRefusedPartner(phoneNumber, NO_RECIPIENT);
+            otherPhone.onCallRefusedPartner(phoneNumber, CALL_NOT_POSSIBLE_REASONS.NO_RECIPIENT);
             return;
 
         }
         else if (this.phoneState !== PhoneStates.NOT_IN_CALL) {
             // this shouldn't happen
             if (this.callPartner && otherPhone.key !== this.callPartner.key) {
-                otherPhone.onCallRefusedPartner(phoneNumber, BUSY);
+                otherPhone.onCallRefusedPartner(phoneNumber, CALL_NOT_POSSIBLE_REASONS.BUSY);
             }
             return;
         }
@@ -331,7 +332,7 @@ class Phone {
     onCallRefusedPartner(phoneNumber, reason) {
         if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
             this.resetCallProperties();
-            this.socket.emit(CALL_NOT_POSSIBLE, reason);
+            this.remotePhone.signalCallNotPossible(reason);
         }
     }
 
@@ -367,7 +368,7 @@ class Phone {
                 break;
             case PhoneStates.CALL_INIT_INCOMING :
                 // this shouldn't happen, but just in case...
-                this.callPartner.onCallRefusedPartner(this.phoneNumber, 'error');
+                this.callPartner.onCallRefusedPartner(this.phoneNumber, CALL_NOT_POSSIBLE_REASONS.ERROR);
                 this.resetCallProperties();
                 break;
             default :
@@ -594,7 +595,7 @@ module.exports.addPhone = function(remotePhone) {
     // for migration
     const socket = remotePhone._socket;
 
-    const phone = new Phone(socket);
+    const phone = new Phone(remotePhone, socket);
     remotePhone.on('disconnect', () => phone.onDisconnect());
     remotePhone.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
     remotePhone.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledged(phoneNumber));
