@@ -6,6 +6,7 @@ const PhoneAccount = require('../models/phoneAccount');
 const phoneManager = require('./phoneManager');
 
 const CALL_NOT_POSSIBLE = 'call_not_possible';
+const CALL_CANCELLED = 'call_cancelled';
 
 // AwaitEventEmitter is only for migration, and needs to change to EventEmitter
 class RemotePhone extends AwaitEventEmitter {
@@ -18,6 +19,9 @@ class RemotePhone extends AwaitEventEmitter {
         this._socket.emit(CALL_NOT_POSSIBLE, reason);
     }
 
+    signalCallCancelled() {
+        this._socket.emit(CALL_CANCELLED);
+    }
 }
 
 function buildSocketIoPhoneAdapter(server) {

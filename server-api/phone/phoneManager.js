@@ -250,7 +250,7 @@ class Phone {
 
         if (this.phoneState === PhoneStates.INVALID) {
             // the phone got suspended
-            this.socket.emit(CALL_CANCELLED);
+            this.remotePhone.signalCallCancelled();
             otherPhone.onCallRefusedPartner(phoneNumber, CALL_NOT_POSSIBLE_REASONS.NO_RECIPIENT);
             return;
 
@@ -339,7 +339,7 @@ class Phone {
     onCallCancelled(phoneNumber) {
         if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
             this.resetCallProperties();
-            this.socket.emit(CALL_CANCELLED);
+            this.remotePhone.signalCallCancelled();
         }
     }
 
