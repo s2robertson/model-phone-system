@@ -235,7 +235,7 @@ class Phone {
             this.callPartner = otherPhone;
             this.billId = phoneAccounts[callerIndex].currentBill;
             this.billingPlanId = phoneAccounts[callerIndex].billingPlan;
-            this.callPartner.emit(CALL_REQUEST, this.phoneNumber);
+            this.callPartner.onIncomingCall(this.phoneNumber);
             //console.log('make_call passed on call request');
         }
         catch (err) {
@@ -243,6 +243,10 @@ class Phone {
             this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.ERROR);
             this.resetCallProperties();
         }
+    }
+
+    onIncomingCall(phoneNumber) {
+        this.socket.emit(CALL_REQUEST, phoneNumber);
     }
 
     async onCallAcknowledged(phoneNumber) {
@@ -479,6 +483,10 @@ class RemotePhone {
         redisClient.publish(this.key, JSON.stringify([BASIC_EMIT, ...args]));
     }
 
+    onIncomingCall(phoneNumber) {
+        redisClient.publish(this.key, JSON.stringify([CALL_REQUEST, phoneNumber]));
+    }
+
     onCallRefusedPartner(phoneNumber, reason) {
         redisClient.publish(this.key, JSON.stringify([CALL_REFUSED, phoneNumber, reason]));
     }
@@ -503,6 +511,10 @@ class RemotePhone {
 remoteEvents.on(BASIC_EMIT, (phone, ...args) => {
     phone.emit(...args);
 });
+
+remoteEvents.on(CALL_REQUEST, (phone, phoneNumber) => {
+    phone.onIncomingCall(phoneNumber);
+})
 
 remoteEvents.on(CALL_REFUSED, (phone, phoneNumber, reason) => {
     phone.onCallRefusedPartner(phoneNumber, reason);
