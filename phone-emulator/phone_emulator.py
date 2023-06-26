@@ -450,7 +450,7 @@ if __name__ == '__main__' :
 
     parser = argparse.ArgumentParser(description='Run a phone emulator for the model phone system.')
     parser.add_argument('phone_number', help='Four digit phone number')
-    parser.add_argument('server_url', default='https://localhost:5000', nargs='?')
+    parser.add_argument('server_url', default='http://localhost:5000', nargs='?')
     parser.add_argument('--ssl_verify', action='store_true', help='Verify SSL certificates')
     args = parser.parse_args()
     
