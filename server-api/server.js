@@ -85,8 +85,7 @@ else {
 }
 
 // Potential improvement: split the phone manager into a separate service from the REST API
-const phoneManager = require('./phone/phoneManager');
-phoneManager.init(server);
+const socketIoPhoneAdapter = require('./phone/socketIoPhoneAdapter')(server);
 
 if (process.env.PROCESS_BILLS) {
     /* This section is largely a prototype.  It probably wants to be turned into a separate process 

@@ -83,13 +83,12 @@ async function getPhone(phoneNumber, queryRemote = true) {
 }
 
 class Phone {
-    constructor(remotePhone, socket) {
+    constructor(remotePhone) {
         this.remotePhone = remotePhone;
-        this.socket = socket;
-        this.phoneState = socket.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
-        this.phoneNumber = socket.phoneNumber;
+        this.phoneState = remotePhone.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
+        this.phoneNumber = remotePhone.phoneNumber;
         this.key = getKey(this.phoneNumber);
-        this.accountId = socket.accountId;
+        this.accountId = remotePhone.accountId;
         this.callPartner = null;
         this.callPartnerConfirmed = false;
         this.billId = null;
@@ -584,53 +583,8 @@ remoteEvents.on(UNSUSPEND_PHONE, (phone) => {
     redisClient.hset(phone.key, IS_VALID, true);
 })
 
-module.exports.init = function(server) {
-    io = require('socket.io')(server, { serveClient : false });
-    
-    io.use(async (socket, next) => {
-        const phoneNumber = socket.handshake.auth.phoneNumber;
-        if (!phoneNumber) {
-            return next(new Error('No phone number provided'));
-        }
-
-        const phoneAccount = await PhoneAccount.findOne({
-            phoneNumber: phoneNumber,
-            isActive: true
-        }).exec();
-        if (!phoneAccount) {
-            return next(new Error('Invalid phone number'));
-        }
-
-        socket.accountId = phoneAccount._id;
-        socket.phoneNumber = phoneNumber;
-        socket.accountSuspended = phoneAccount.isSuspended;
-        next();
-    });
-
-    io.on('connection', (socket) => {
-        //console.log('phone connecting:');
-        const phone = new Phone(socket);
-        //console.log(`   phone number: ${phone.phoneNumber}`)    ;
-        
-        socket.on('disconnect', () => phone.onDisconnect());
-        socket.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
-        socket.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledgedSelf(phoneNumber));
-        socket.on('call_accepted', () => phone.onCallAccepted());
-        socket.on('hang_up', () => phone.onHangUp());
-        socket.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
-        socket.on('talk', (msg) => phone.onTalkSelf(msg));
-
-        socket.emit('registered', phone.phoneNumber);
-        localRegistry.set(phone.key, phone);
-        phone.initRemote();
-    });
-}
-
 module.exports.addPhone = function(remotePhone) {
-    // for migration
-    const socket = remotePhone._socket;
-
-    const phone = new Phone(remotePhone, socket);
+    const phone = new Phone(remotePhone);
     remotePhone.on('disconnect', () => phone.onDisconnect());
     remotePhone.on('make_call', (phoneNumber) => phone.onMakeCall(phoneNumber));
     remotePhone.on('call_acknowledged', (phoneNumber) => phone.onCallAcknowledgedSelf(phoneNumber));

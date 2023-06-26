@@ -20,6 +20,9 @@ class RemotePhone extends AwaitEventEmitter {
     constructor(socket) {
         super();
         this._socket = socket;
+        this.accountId = socket.accountId;
+        this.phoneNumber = socket.phoneNumber;
+        this.accountSuspended = socket.accountSuspended;
     }
 
     signalCallRequest(phoneNumber) {
