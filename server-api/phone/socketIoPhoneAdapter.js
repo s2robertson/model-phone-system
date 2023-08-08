@@ -1,62 +1,7 @@
-const EventEmitter = require('events');
-const AwaitEventEmitter = require('../helpers/awaitEventEmitter');
 const io = require('socket.io');
-
+const SocketIoRemotePhone = require('./socketIoRemotePhone');
 const PhoneAccount = require('../models/phoneAccount');
 const phoneManager = require('./phoneManager');
-
-const CALL_REQUEST = 'call_request';
-const CALL_NOT_POSSIBLE = 'call_not_possible';
-const CALL_CANCELLED = 'call_cancelled';
-const CALLEE_RINGING = 'callee_ringing';
-const CALL_CONNECTED = 'call_connected';
-const CALL_ENDED = 'call_ended';
-const TALK = 'talk';
-
-const ERROR = 'error';
-
-// AwaitEventEmitter is only for migration, and needs to change to EventEmitter
-class RemotePhone extends AwaitEventEmitter {
-    constructor(socket) {
-        super();
-        this._socket = socket;
-        this.accountId = socket.accountId;
-        this.phoneNumber = socket.phoneNumber;
-        this.accountSuspended = socket.accountSuspended;
-    }
-
-    signalCallRequest(phoneNumber) {
-        this._socket.emit(CALL_REQUEST, phoneNumber);
-    }
-
-    signalCalleeRinging() {
-        this._socket.emit(CALLEE_RINGING);
-    }
-
-    signalCallNotPossible(reason) {
-        this._socket.emit(CALL_NOT_POSSIBLE, reason);
-    }
-
-    signalCallCancelled() {
-        this._socket.emit(CALL_CANCELLED);
-    }
-
-    signalCallConnected() {
-        this._socket.emit(CALL_CONNECTED);
-    }
-
-    signalCallEnded() {
-        this._socket.emit(CALL_ENDED);
-    }
-
-    signalIncomingTalk(msg) {
-        this._socket.emit(TALK, msg);
-    }
-
-    signalError(reason) {
-        this._socket.emit(ERROR, reason);
-    }
-}
 
 function buildSocketIoPhoneAdapter(server) {
     const adapter = io(server, { serveClient: false });
@@ -83,7 +28,7 @@ function buildSocketIoPhoneAdapter(server) {
 
     adapter.on('connection', (socket) => {
         //console.log('phone connecting:');
-        const phone = new RemotePhone(socket);
+        const phone = new SocketIoRemotePhone(socket);
         //console.log(`   phone number: ${phone.phoneNumber}`)    ;
         
         // 'disconnect' event is special, and not handled by onAny
