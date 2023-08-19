@@ -25,6 +25,7 @@ __pycache__/
 .env.production.local
 nodemon.json
 jsconfig.json
+*.code-workspace
 
 npm-debug.log*
 yarn-debug.log*
