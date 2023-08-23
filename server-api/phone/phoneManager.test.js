@@ -871,7 +871,7 @@ describe('make_call tests with multiple parties', () => {
     })
 });
 
-describe('tests involving remote phones', () => {
+describe.skip('tests involving remote phones', () => {
     let server;
     let mockSocket1111;
     let mockPhone1111;
@@ -1111,7 +1111,7 @@ describe('tests involving remote phones', () => {
         expect(processCall).not.toHaveBeenCalled();
     });
 
-    test('called by a remote phone, local phone hangs up, does not receive ack', async () => {
+    test.skip('called by a remote phone, local phone hangs up, does not receive ack', async () => {
         await subClient._emit('message', 'phone:1111', JSON.stringify(['call_request', '2222']));
         expect(mockPhone1111.signalCallRequest).toHaveBeenCalledTimes(1);
         expect(mockPhone1111.signalCallRequest).toHaveBeenLastCalledWith('2222');

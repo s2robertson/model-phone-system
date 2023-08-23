@@ -1,23 +1,4 @@
-let io;
-const localRegistry = new Map();
-const getKey = phoneNumber => `phone:${phoneNumber}`;
-
-const EventEmitter = require('events');
-const remoteEvents = new EventEmitter();
-
-const Redis = require('ioredis');
-// Potential improvement: use a separate redis instance instead of just namespacing
-const redisClient = new Redis(process.env.REDIS_CONN, { db: 1 });
-const subClient = redisClient.duplicate();
-
-subClient.on('message', (channel, msg) => {
-    const phone = localRegistry.get(channel);
-    if (phone) {
-        const [event, ...eventArgs] = JSON.parse(msg);
-
-        remoteEvents.emit(event, phone, ...eventArgs);
-    }
-});
+const registry = require('./registry/');
 
 const PhoneAccount = require('../models/phoneAccount');
 const BillingPlan = require('../models/billingPlan');
@@ -45,56 +26,22 @@ const CALL_NOT_POSSIBLE_REASONS = {
 }
 Object.freeze(CALL_NOT_POSSIBLE_REASONS);
 
-const CALL_REQUEST = 'call_request';
-const CALL_REFUSED = 'call_refused';
-const CALLEE_RINGING = 'callee_ringing';
-const CALL_CANCELLED = 'call_cancelled';
-const CALL_CONNECTED = 'call_connected';
-const CALL_ENDED = 'call_ended';
-const CLOSE_CALL_ACK = 'close_call_ack';
-const TALK = 'talk';
-
 const UPDATE_PHONE_NUMBER = 'update_phone_number';
 const SUSPEND_PHONE = 'suspend_phone';
 const UNSUSPEND_PHONE = 'unsuspend_phone';
-
-const ACCOUNT_ID = 'accountId';
-const IS_VALID = 'isValid';
-const CALL_ID = 'callId';
-const CALL_BP_ID = 'callBpId';
-
-async function getPhone(phoneNumber, queryRemote = true) {
-    const otherPhoneKey = getKey(phoneNumber);
-    let otherPhone = localRegistry.get(otherPhoneKey);
-    if (!otherPhone) {
-        if (queryRemote) {
-            const otherPhoneData = await redisClient.hgetall(otherPhoneKey);
-            
-            if (otherPhoneData[ACCOUNT_ID]) {
-                otherPhone = new RemotePhone(phoneNumber, otherPhoneData);
-            }
-        }
-        else {
-            // looking up remote phone data isn't needed when on the receiving end of a call
-            otherPhone = new RemotePhone(phoneNumber, {});
-        }
-    }
-    return otherPhone;
-}
 
 class Phone {
     constructor(remotePhone) {
         this.remotePhone = remotePhone;
         this.phoneState = remotePhone.accountSuspended ? PhoneStates.INVALID : PhoneStates.NOT_IN_CALL;
         this.phoneNumber = remotePhone.phoneNumber;
-        this.key = getKey(this.phoneNumber);
         this.accountId = remotePhone.accountId;
         this.callPartner = null;
         this.callPartnerConfirmed = false;
         this.billId = null;
         this.billingPlanId = null;
         this.callDoc = null;
-        this.callCloseTimer = null;
+        // this.callCloseTimer = null;
     }
 
     get isValid() {
@@ -108,33 +55,7 @@ class Phone {
             this.phoneState ===  PhoneStates.CALL_ACTIVE;
     }
 
-    async initRemote() {
-        const hsetArgs = [this.key, 
-            ACCOUNT_ID, this.accountId, 
-            IS_VALID, !(this.phoneState === PhoneStates.INVALID)
-        ];
-        if (this.callDoc) {
-            hsetArgs.push(CALL_ID, this.callDoc.id);
-        }
-        if (this.billingPlanId) {
-            hsetArgs.push(CALL_BP_ID, this.billingPlanId);
-        }
-        return Promise.all([
-            redisClient.hset(...hsetArgs),
-            subClient.subscribe(this.key)
-        ]);
-    }
-
-    async clearRemote() {
-        return Promise.all([
-            redisClient.del(this.key),
-            subClient.unsubscribe(this.key)
-        ]);
-    }
-
     async onDisconnect() {
-        localRegistry.delete(this.key);
-        
         switch (this.phoneState) {
             case PhoneStates.CALL_INIT_OUTGOING :
                 this.callPartner.onCallCancelled(this.phoneNumber);
@@ -147,11 +68,10 @@ class Phone {
             case PhoneStates.CALL_ACTIVE :
                 await this.closeCall();
                 break;
-            default :
         }
         
         this.phoneState = PhoneStates.INVALID;
-        await this.clearRemote();
+        registry.delete(this.phoneNumber);
     }
 
     async onMakeCall(phoneNumber) {
@@ -173,7 +93,7 @@ class Phone {
                 return;
             }
     
-            const otherPhone = await getPhone(phoneNumber);
+            const otherPhone = await registry.get(phoneNumber);
             
             if (!otherPhone || !otherPhone.isValid) {
                 this.remotePhone.signalCallNotPossible(CALL_NOT_POSSIBLE_REASONS.NO_RECIPIENT);
@@ -246,7 +166,7 @@ class Phone {
     }
 
     async onCallAcknowledgedSelf(phoneNumber) {
-        const otherPhone = await getPhone(phoneNumber, false);
+        const otherPhone = await registry.get(phoneNumber);
 
         if (this.phoneState === PhoneStates.INVALID) {
             // the phone got suspended
@@ -272,7 +192,7 @@ class Phone {
         this.remotePhone.signalCalleeRinging();
     }
 
-    async onCallAccepted() {
+    onCallAccepted() {
         if (this.phoneState === PhoneStates.CALL_INIT_INCOMING) {
             this.onCallAcceptedIncoming();
         }
@@ -315,10 +235,7 @@ class Phone {
             this.callDoc = callDoc;
             this.callPartner.onPartnerConnected(this.phoneNumber);
             
-            await redisClient.multi()
-                .hset(this.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
-                .hset(this.callPartner.key, CALL_ID, this.callDoc.id, CALL_BP_ID, this.billingPlanId)
-                .exec();
+            await registry.beginCall(this.phoneNumber, this.callPartner.phoneNumber, this.callDoc.id, this.billingPlanId);
         }
         catch (err) {
             if (this.phoneState === PhoneStates.CALL_ACTIVE) {
@@ -336,7 +253,7 @@ class Phone {
             this.resetCallProperties();
         }
         else {
-            otherPhone = await getPhone(phoneNumber, false);
+            otherPhone = await registry.get(phoneNumber);
         }
         otherPhone.onCallRefusedPartner(this.phoneNumber, reason);
     }
@@ -366,9 +283,9 @@ class Phone {
         switch (this.phoneState) {
             case PhoneStates.CALL_ACTIVE :
                 await this.closeCall();
-                if (!this.callCloseTimer) {
-                    this.resetCallProperties();
-                }
+                this.resetCallProperties();
+                /*if (!this.callCloseTimer) {
+                }*/
                 break;
             case PhoneStates.CALL_INIT_CREATING_DOC :
                 // the onCallAccepted handler will do the rest
@@ -405,10 +322,7 @@ class Phone {
                 const billingPlan = await BillingPlan.findById(bpId).exec();
                 processCall(this.callDoc, billingPlan);
                 await this.callDoc.save();
-                await redisClient.multi()
-                    .hdel(this.key, CALL_ID, CALL_BP_ID)
-                    .hdel(this.callPartner.key, CALL_ID, CALL_BP_ID)
-                    .exec();
+                await registry.endCall(this.phoneNumber, this.callPartner.phoneNumber);
             }
             catch (err) {
                 console.log(err);
@@ -417,7 +331,7 @@ class Phone {
         else {
             /* If the callee hung up, ask the caller's server to process the call.  However, if no
              * acknowledgement is received, look up the call details and process the call recursively. */
-            this.callCloseTimer = setTimeout(async () => {
+            /*this.callCloseTimer = setTimeout(async () => {
                 this.callCloseTimer = null;
                 try {
                     const external = await redisClient.hgetall(this.key);
@@ -429,15 +343,16 @@ class Phone {
                 catch (err) {
                     // ?
                 }
-            }, 5000); // the timeout value could be changed
+            }, 5000); // the timeout value could be changed 
+            */
             await this.callPartner.onCallEndedRemotely(this.phoneNumber, true);
         }
     }
 
-    async onCallEndedRemotely(phoneNumber, ack = false) {
+    async onCallEndedRemotely(phoneNumber, /*ack = false*/) {
         if (this.callPartner && this.callPartner.phoneNumber === phoneNumber) {
             this.remotePhone.signalCallEnded();
-            if (ack) {
+            if (this.callDoc /*ack*/) {
                 // the remote server wants this one to process the call
                 await this.closeCall(false);
                 this.callPartner.onCloseCallAcknowledgement(this.phoneNumber);
@@ -447,9 +362,9 @@ class Phone {
     }
 
     onCloseCallAcknowledgement(phoneNumber) {
-        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber && this.callCloseTimer) {
-            clearTimeout(this.callCloseTimer);
-            this.callCloseTimer = null;
+        if (this.callPartner && this.callPartner.phoneNumber === phoneNumber /*&& this.callCloseTimer*/) {
+            // clearTimeout(this.callCloseTimer);
+            // this.callCloseTimer = null;
             this.resetCallProperties();
         }
     }
@@ -480,109 +395,6 @@ class Phone {
     }
 }
 
-function parseBoolean(bool) {
-    return !(bool == false || bool === 'false');
-}
-
-class RemotePhone {
-    constructor(phoneNumber, remotePhoneData) {
-        this.phoneNumber = phoneNumber;
-        this.key = getKey(this.phoneNumber);
-        this.accountId = remotePhoneData[ACCOUNT_ID];
-        this.isValid = parseBoolean(remotePhoneData[IS_VALID]);
-        this.isOnCall = !!remotePhoneData[CALL_ID];
-    }
-
-    onIncomingCall(phoneNumber) {
-        redisClient.publish(this.key, JSON.stringify([CALL_REQUEST, phoneNumber]));
-    }
-
-    onCallAcknowledgedPartner() {
-        redisClient.publish(this.key, JSON.stringify([CALLEE_RINGING]));
-    }
-
-    onCallRefusedPartner(phoneNumber, reason) {
-        redisClient.publish(this.key, JSON.stringify([CALL_REFUSED, phoneNumber, reason]));
-    }
-
-    onPartnerConnected(phoneNumber) {
-        redisClient.publish(this.key, JSON.stringify([CALL_CONNECTED, phoneNumber]));
-    }
-
-    onCallCancelled(phoneNumber) {
-        redisClient.publish(this.key, JSON.stringify([CALL_CANCELLED, phoneNumber]));
-    }
-
-    onCallEndedRemotely(phoneNumber, ack = false) {
-        redisClient.publish(this.key, JSON.stringify([CALL_ENDED, phoneNumber, ack]));
-    }
-
-    onCloseCallAcknowledgement(phoneNumber) {
-        redisClient.publish(this.key, JSON.stringify([CLOSE_CALL_ACK, phoneNumber]));
-    }
-
-    onTalkPartner(msg) {
-        redisClient.publish(this.key, JSON.stringify([TALK, msg]));
-    }
-}
-
-remoteEvents.on(CALL_REQUEST, (phone, phoneNumber) => {
-    phone.onIncomingCall(phoneNumber);
-});
-
-remoteEvents.on(CALLEE_RINGING, (phone) => {
-    phone.onCallAcknowledgedPartner();
-})
-
-remoteEvents.on(CALL_REFUSED, (phone, phoneNumber, reason) => {
-    phone.onCallRefusedPartner(phoneNumber, reason);
-});
-
-remoteEvents.on(CALL_CANCELLED, (phone, phoneNumber) => {
-    phone.onCallCancelled(phoneNumber);
-});
-
-remoteEvents.on(CALL_CONNECTED, (phone, phoneNumber) => {
-    phone.onPartnerConnected(phoneNumber);
-});
-
-remoteEvents.on(CALL_ENDED, (phone, phoneNumber, ack) => {
-    phone.onCallEndedRemotely(phoneNumber, ack);
-});
-
-remoteEvents.on(CLOSE_CALL_ACK, (phone, phoneNumber) => {
-    phone.onCloseCallAcknowledgement(phoneNumber);
-});
-
-remoteEvents.on(TALK, (phone, msg) => {
-    phone.onTalkPartner(msg);
-})
-
-remoteEvents.on(UPDATE_PHONE_NUMBER, async (phone, newPhoneNumber) => {
-    const newKey = getKey(newPhoneNumber);
-    localRegistry.delete(phone.key);
-    await phone.clearRemote();
-
-    phone.phoneNumber = newPhoneNumber;
-    phone.key = newKey;
-    localRegistry.set(newKey, phone);
-    await phone.initRemote();
-});
-
-remoteEvents.on(SUSPEND_PHONE, async (phone) => {
-    const prevState = phone.phoneState;
-    phone.phoneState = PhoneStates.INVALID;
-    if (!(prevState === PhoneStates.INVALID || prevState === PhoneStates.NOT_IN_CALL)) {
-        await phone.onHangUp();
-    }
-    await redisClient.hset(phone.key, IS_VALID, false);
-});
-
-remoteEvents.on(UNSUSPEND_PHONE, (phone) => {
-    phone.phoneState = PhoneStates.NOT_IN_CALL;
-    redisClient.hset(phone.key, IS_VALID, true);
-})
-
 module.exports.addPhone = function(remotePhone) {
     const phone = new Phone(remotePhone);
     remotePhone.on('disconnect', () => phone.onDisconnect());
@@ -593,19 +405,57 @@ module.exports.addPhone = function(remotePhone) {
     remotePhone.on('call_refused', (phoneNumber, reason) => phone.onCallRefusedSelf(phoneNumber, reason));
     remotePhone.on('talk', (msg) => phone.onTalkSelf(msg));
 
-    localRegistry.set(phone.key, phone);
-    phone.initRemote();
+    registry.set(phone.phoneNumber, phone);
 }
 
-module.exports.updatePhoneNumber = function(oldVal, newVal) {
-    const oldKey = getKey(oldVal);
-    redisClient.publish(oldKey, JSON.stringify([UPDATE_PHONE_NUMBER, newVal]));
+module.exports.updatePhoneNumber = async function(oldVal, newVal) {
+    const phone = await registry.get(oldVal)
+    await registry.delete(oldVal);
+    phone.phoneNumber = newVal;
+    await registry.set(newVal, phone);
+    // const oldKey = getKey(oldVal);
+    // redisClient.publish(oldKey, JSON.stringify([UPDATE_PHONE_NUMBER, newVal]));
 }
+
+/*remoteEvents.on(UPDATE_PHONE_NUMBER, async (phone, newPhoneNumber) => {
+    const newKey = getKey(newPhoneNumber);
+    localRegistry.delete(phone.key);
+    await phone.clearRemote();
+
+    phone.phoneNumber = newPhoneNumber;
+    phone.key = newKey;
+    localRegistry.set(newKey, phone);
+    await phone.initRemote();
+});*/
 
 module.exports.suspendPhone = async function(phoneNumber) {
-    redisClient.publish(getKey(phoneNumber), JSON.stringify([SUSPEND_PHONE]));    
+    const phone = await registry.get(phoneNumber);
+    const prevState = phone.phoneState;
+    phone.phoneState = PhoneStates.INVALID;
+    if (!(prevState === PhoneStates.INVALID || prevState === PhoneStates.NOT_IN_CALL)) {
+        await phone.onHangUp();
+    }
+    await registry.changeValidState(phoneNumber, false);
+    // redisClient.publish(getKey(phoneNumber), JSON.stringify([SUSPEND_PHONE]));    
 }
 
-module.exports.unsuspendPhone = function(phoneNumber) {
-    redisClient.publish(getKey(phoneNumber), JSON.stringify([UNSUSPEND_PHONE]));
+/*remoteEvents.on(SUSPEND_PHONE, async (phone) => {
+    const prevState = phone.phoneState;
+    phone.phoneState = PhoneStates.INVALID;
+    if (!(prevState === PhoneStates.INVALID || prevState === PhoneStates.NOT_IN_CALL)) {
+        await phone.onHangUp();
+    }
+    await redisClient.hset(phone.key, IS_VALID, false);
+});*/
+
+module.exports.unsuspendPhone = async function(phoneNumber) {
+    const phone = await registry.get(phoneNumber);
+    phone.phoneState = PhoneStates.NOT_IN_CALL;
+    await registry.changeValidState(phoneNumber, true);
+    // redisClient.publish(getKey(phoneNumber), JSON.stringify([UNSUSPEND_PHONE]));
 }
+
+/*remoteEvents.on(UNSUSPEND_PHONE, (phone) => {
+    phone.phoneState = PhoneStates.NOT_IN_CALL;
+    redisClient.hset(phone.key, IS_VALID, true);
+})*/
