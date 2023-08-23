@@ -144,6 +144,7 @@ module.exports.updatePhoneAccount = async function({ _id, billingPlan, phoneNumb
                 paDoc.unpaidBills = paDoc.unpaidBills.slice(index + 1);
                 if (paDoc.isSuspended && paDoc.unpaidBills.length < unpaidBillsLimit) {
                     paDoc.isSuspended = false;
+                    await PhoneManager.unsuspendPhone(paDoc.phoneNumber);
                     if (!paDoc.populated('currentBill')) {
                         await paDoc.populate('currentBill').execPopulate();
                     }
@@ -157,7 +158,7 @@ module.exports.updatePhoneAccount = async function({ _id, billingPlan, phoneNumb
 
         if (closeAccount === true) {
             paDoc.isActive = false;
-            PhoneManager.suspendPhone(oldPhoneNumber);
+            await PhoneManager.suspendPhone(oldPhoneNumber);
             if (!paDoc.populated('currentBill')) {
                 await paDoc.populate('currentBill').execPopulate();
             }
@@ -191,13 +192,8 @@ module.exports.updatePhoneAccount = async function({ _id, billingPlan, phoneNumb
     }
 
     // post updates to the phone manager if necessary
-    if (paDoc.isActive) {
-        if (paDoc.isModified('phoneNumber') && paDoc.phoneNumber !== oldPhoneNumber) {
-            PhoneManager.updatePhoneNumber(oldPhoneNumber, paDoc.phoneNumber);
-        }
-        if (paDoc.isModified('isSuspended') && !paDoc.isSuspended) {
-            PhoneManager.unsuspendPhone(paDoc.phoneNumber);
-        }
+    if (paDoc.isActive && paDoc.phoneNumber !== oldPhoneNumber) {
+        await PhoneManager.updatePhoneNumber(oldPhoneNumber, paDoc.phoneNumber);
     }
     return paDoc;
 }
